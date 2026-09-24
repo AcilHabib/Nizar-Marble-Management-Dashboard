@@ -1,0 +1,40 @@
+Role: Expert Frontend Developer.
+Task: Scaffold a Next.js (App Router) project with Tailwind CSS for a marble factory management dashboard ("نزار للرخام").
+Approach: Mobile-first, fully responsive. Bilingual support (Arabic RTL as default, French LTR). Use mock JSON data for now (no backend). 
+
+DESIGN SYSTEM & TAILWIND CONFIG:
+- Background: #F8F8F6
+- Cards: #FFFFFF
+- Main text: #17212B
+- Secondary text: #5F6B76
+- Borders: #E7E5E0
+- Branding/Accents: Beige/stone #CFC3AE (icons, selected states), Graphite #3A3D3F (headers, charts)
+- Status Colors: Confirmed (#2E9B68), In Progress (#D99A32), Delivered (#4D8AC9), Canceled (#D95C55).
+
+CORE LAYOUT:
+- Sidebar/Bottom navigation (mobile responsive) with links to: Analytics, Inventory, Orders, Finance, Settings.
+- Support a language switcher (AR/FR) that changes text direction (RTL for Arabic).
+
+PAGES TO BUILD (WITH MOCK DATA):
+1. Analytics (Primary Page): Display mockup charts (using Recharts or Chart.js) showing revenue, order volume, and top-selling marble types.
+2. Inventory/Catalogue Page: 
+   - A grid/table displaying marble types with filters.
+   - "Add Product" form modal containing: Marble type (dropdown/creatable), Quantity (number + unit selector), Supplier (dropdown), Color, Purchase Price, Dimensions, Selling Price (per unit area/volume), Image upload, and a toggle for "Visibility/Availability".
+3. Orders Page:
+   - A data table with columns: Order #, Customer, Marble Kind, Dimensions, Thickness, Edges, Staff Creator, Status. Include a search bar and filters.
+   - "Create Order" complex form: Select/create customer, add multiple pieces (dynamic form fields for marble kind, dimensions, thickness, rounded edges). Show an auto-updating "Total Price" calculation at the bottom.
+   - Clicking a row should route to a dynamic `[orderId]` payment page.
+4. Payment Page (Order Details):
+   - Layout split into Order Info, Customer Info, and Payment Details.
+   - Payment Details section: Shows Due Amount, Paid Amount, Remaining Amount. 
+   - A "Deposits" table showing dates and amounts (with Edit/Delete mockup buttons).
+   - A form to "Add Deposit".
+   - Two action buttons: "Print Receipt" (mockup a printable invoice view in Arabic) and "Export to Excel" (mock button).
+5. Finance Page:
+   - Dashboard showing Profit, Loss, Revenue, and Costs.
+   - Section for Staff Salaries listing staff members, base salary, and payment status.
+6. Settings Page:
+   - Visible only to "Owner" role (mock this state).
+   - A table managing Staff Accounts (Add, Edit, Delete).
+
+Output: Set up the Next.js app, configure Tailwind with the exact hex codes, set up the routing, and build responsive pages with beautiful, clean, modern UI components.

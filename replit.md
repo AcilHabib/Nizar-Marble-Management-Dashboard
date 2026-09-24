@@ -1,10 +1,11 @@
-# [Project name]
+# Nizar Marble Management Dashboard
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Arabic-first bilingual dashboard for running a marble factory's analytics, inventory, orders, payments, finance, and staff operations.
 
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/nizar-marble-dashboard run dev` — run the dashboard preview
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
@@ -22,23 +23,31 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/nizar-marble-dashboard/src/App.tsx` — dashboard routes, mock data, and UI behavior
+- `artifacts/nizar-marble-dashboard/src/index.css` — Tailwind theme tokens and global styles
+- `artifacts/nizar-marble-dashboard/.replit-artifact/artifact.toml` — artifact routing and preview configuration
+- `artifacts/api-server/` — shared API service scaffold; not used by the current mock-data dashboard
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The first build is frontend-only with local mock JSON data, matching the approved scaffold and keeping the dashboard immediately usable without setup.
+- The dashboard uses the shared React + Vite artifact template with Wouter routing so all requested pages work within the artifact's preview path.
+- Arabic is the default interface direction; switching to French changes copy and document direction to LTR.
+- Form submissions and CRUD controls are intentionally mocked with local state until a backend contract is defined.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Nizar Marble gives factory owners and staff a single operational view of revenue, orders, stock, customer payments, costs, and staff accounts. It includes responsive navigation, analytics, searchable inventory and order workflows, order payment details, finance summaries, and owner-only settings.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+ - Arabic RTL as the default language, with French LTR as the alternate.
+ - Use the exact stone, graphite, and status colors from the product brief.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- The dashboard artifact workflow supplies `PORT` and `BASE_PATH`; run it through the managed workflow rather than starting Vite without those variables.
+- The current data layer is mock-only; replacing it with real persistence requires defining an OpenAPI contract before wiring frontend mutations.
 
 ## Pointers
 

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Nizar Marble Management Dashboard"
+description = "A bilingual Arabic-first management dashboard for a marble factory, covering analytics, inventory, orders, payments, finance, and staff settings with responsive mock-data workflows."
+version = "1.0.0"
+id = "artifacts/nizar-marble-dashboard"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25627
+
+[services.development]
+run = "pnpm --filter @workspace/nizar-marble-dashboard run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/nizar-marble-dashboard", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/nizar-marble-dashboard/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25627"
+BASE_PATH = "/"
