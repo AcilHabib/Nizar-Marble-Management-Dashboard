@@ -105,10 +105,13 @@ async function buildAll() {
       "electron",
     ],
     sourcemap: "linked",
-    plugins: [
-      // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it
-      esbuildPluginPino({ transports: ["pino-pretty"] })
-    ],
+    plugins:
+      process.env.VERCEL === "1"
+        ? []
+        : [
+            // pino relies on workers; skip on Vercel (serverless) to avoid worker thread failures
+            esbuildPluginPino({ transports: ["pino-pretty"] }),
+          ],
     // Make sure packages that are cjs only (e.g. express) but are bundled continue to work in our esm output file
     banner: {
       js: `import { createRequire as __bannerCrReq } from 'node:module';
