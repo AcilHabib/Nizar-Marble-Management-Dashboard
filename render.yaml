@@ -1,0 +1,21 @@
+# Deploy: Render Dashboard → New → Blueprint → connect this repo.
+# Set DATABASE_URL to your MongoDB Atlas connection string when prompted.
+services:
+  - type: web
+    name: nizar-marble-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: >-
+      corepack enable &&
+      corepack prepare pnpm@9.15.0 --activate &&
+      pnpm install &&
+      pnpm --filter @workspace/db exec prisma generate --schema=./prisma/schema.prisma &&
+      pnpm --filter @workspace/api-server run build
+    startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
