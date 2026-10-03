@@ -2,12 +2,18 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "installCommand": "pnpm install",
-  "buildCommand": "BASE_PATH=/ PORT=3000 pnpm --filter @workspace/nizar-marble-dashboard run build",
+  "buildCommand": "pnpm --filter @workspace/db exec prisma generate --schema=./prisma/schema.prisma && BASE_PATH=/ PORT=3000 pnpm --filter @workspace/nizar-marble-dashboard run build",
   "outputDirectory": "artifacts/nizar-marble-dashboard/dist/public",
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "https://nizar-marble-api.onrender.com/api/:path*"
+      "source": "/api/(.*)",
+      "destination": "/api"
     }
-  ]
+  ],
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 30,
+      "includeFiles": "lib/db/prisma/**"
+    }
+  }
 }
