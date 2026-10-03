@@ -4,19 +4,21 @@ Arabic-first bilingual dashboard for running a marble factory's analytics, inven
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm --filter @workspace/nizar-marble-dashboard run dev` — run the dashboard preview
+- `pnpm dev:api` — API server on port 8080 (requires `DATABASE_URL` in `.env`)
+- `pnpm dev` — dashboard on port 25627 (proxies `/api` to the API server)
+- `pnpm dev:all` — run API + dashboard together
+- `pnpm db:push` / `pnpm db:seed` — sync Prisma schema and seed MongoDB
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL` — MongoDB connection string (see `.env.example`)
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5
-- DB: PostgreSQL + Drizzle ORM
+- DB: MongoDB Atlas + Prisma ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
 - Build: esbuild (CJS bundle)
@@ -30,7 +32,7 @@ Arabic-first bilingual dashboard for running a marble factory's analytics, inven
 
 ## Architecture decisions
 
-- The first build is frontend-only with local mock JSON data, matching the approved scaffold and keeping the dashboard immediately usable without setup.
+- The dashboard reads and writes through the Express API (`/api/*`) backed by MongoDB via Prisma.
 - The dashboard uses the shared React + Vite artifact template with Wouter routing so all requested pages work within the artifact's preview path.
 - Arabic is the default interface direction; switching to French changes copy and document direction to LTR.
 - Form submissions and CRUD controls are intentionally mocked with local state until a backend contract is defined.
@@ -47,7 +49,7 @@ Nizar Marble gives factory owners and staff a single operational view of revenue
 ## Gotchas
 
 - The dashboard artifact workflow supplies `PORT` and `BASE_PATH`; run it through the managed workflow rather than starting Vite without those variables.
-- The current data layer is mock-only; replacing it with real persistence requires defining an OpenAPI contract before wiring frontend mutations.
+- Ensure MongoDB Atlas **Network Access** allows your IP (or `0.0.0.0/0` for dev) before running `pnpm db:push`.
 
 ## Pointers
 

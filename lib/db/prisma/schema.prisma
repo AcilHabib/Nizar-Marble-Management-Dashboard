@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+type OrderPiece {
+  kind          String
+  dims          String
+  thickness     String
+  edges         String
+  qty           Int
+  price         Int
+  sliceId       String @default("")
+  cutLengthM    Float  @default(0)
+  cutWidthM     Float  @default(0)
+  lineTotal     Int    @default(0)
+  sellingPerSqm Int    @default(0)
+}
+
+model Customer {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  fullName  String
+  phone     String
+  address   String
+  orders    Order[]
+  createdAt DateTime @default(now())
+}
+
+model Order {
+  id                 String       @id @default(auto()) @map("_id") @db.ObjectId
+  orderNumber        String       @unique
+  customerId         String?      @db.ObjectId
+  customerRecord     Customer?    @relation(fields: [customerId], references: [id])
+  customer           String
+  orderDate          DateTime     @default(now())
+  kind               String
+  total              Int
+  linesSubtotal      Int          @default(0)
+  edgeRoundingPrice  Int          @default(0)
+  status             String
+  staff              String
+  dimensions         String?
+  thickness          String?
+  edges              String?
+  pieces             OrderPiece[]
+  deposits           Deposit[]
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+}
+
+model Deposit {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  orderId     String   @db.ObjectId
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount      Int
+  method      String
+  recordedBy  String   @default("")
+  depositDate DateTime @default(now())
+}
+
+model StaffAction {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  staffId   String?
+  staffName String
+  action    String
+  detail    String?
+  createdAt DateTime @default(now())
+}
+
+model Supplier {
+  id        String        @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  phone     String
+  address   String
+  slices    MarbleSlice[]
+  createdAt DateTime      @default(now())
+}
+
+model MarbleKind {
+  id        String        @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  color     String        @default("")
+  imageUrl  String?
+  visible   Boolean       @default(true)
+  tone      String        @default("cream")
+  slices    MarbleSlice[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+type SliceWasteRect {
+  lengthM Float
+  widthM  Float
+}
+
+model MarbleSlice {
+  id             String           @id @default(auto()) @map("_id") @db.ObjectId
+  kindId         String           @db.ObjectId
+  kind           MarbleKind       @relation(fields: [kindId], references: [id], onDelete: Cascade)
+  supplierId     String           @db.ObjectId
+  supplier       Supplier         @relation(fields: [supplierId], references: [id])
+  lengthM        Float
+  widthM         Float
+  thicknessM     Float
+  wastes         SliceWasteRect[]
+  sliceCount     Int              @default(1)
+  purchasePerSqm       Int
+  sellingPerSqm        Int
+  consumedNetAreaSqm   Float            @default(0)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+}
+
+model StaffMember {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  role      String
+  email     String   @unique
+  status    String   @default("نشط")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

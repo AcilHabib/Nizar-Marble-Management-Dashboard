@@ -4,6 +4,13 @@
   "license": "MIT",
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
+    "dev": "PORT=25627 BASE_PATH=/ pnpm --filter @workspace/nizar-marble-dashboard run dev",
+    "dev:api": "PORT=8080 pnpm --filter @workspace/api-server run dev",
+    "dev:all": "PORT=8080 pnpm --filter @workspace/api-server run dev & PORT=25627 BASE_PATH=/ pnpm --filter @workspace/nizar-marble-dashboard run dev",
+    "db:generate": "pnpm --filter @workspace/db run generate",
+    "db:push": "pnpm --filter @workspace/db run push",
+    "db:seed": "pnpm --filter @workspace/db run seed",
+    "db:migrate-slices": "pnpm --filter @workspace/db run migrate-slices",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
