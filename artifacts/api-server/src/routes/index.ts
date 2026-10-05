@@ -7,10 +7,12 @@ import ordersRouter from "./orders";
 import staffRouter from "./staff";
 import dashboardRouter from "./dashboard";
 import financeRouter from "./finance";
+import uploadsRouter from "./uploads";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use("/uploads", uploadsRouter);
 router.use("/suppliers", suppliersRouter);
 router.use("/customers", customersRouter);
 router.use("/marble-kinds", marbleKindsRouter);

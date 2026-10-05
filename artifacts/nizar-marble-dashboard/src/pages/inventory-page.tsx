@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
+  Loader2,
   Minus,
   Pencil,
   Plus,
@@ -10,6 +11,9 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { EditableSliceRow } from '@/components/editable-slice-row';
+import { PageLoading } from '@/components/page-loading';
+import { resolveMarbleImageUrl, uploadMarbleImage } from '@/lib/marble-image';
 import { createPortal } from 'react-dom';
 import { Link, useParams } from 'wouter';
 import {
@@ -23,7 +27,6 @@ import {
   formatAreaSqm,
   formatCurrency,
   formatNumber,
-  isImageSource,
 } from '@/lib/format';
 
 type Lang = 'ar' | 'fr';
@@ -351,6 +354,7 @@ export function InventoryList({ lang }: { lang: Lang }) {
   const [maxPriceInput, setMaxPriceInput] = useState('');
   const [kindModal, setKindModal] = useState<'create' | MarbleKind | null>(null);
   const [imagePreview, setImagePreview] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [notice, setNotice] = useState('');
 
   const { data: kinds = [], isLoading, error } = useQuery({
@@ -387,15 +391,25 @@ export function InventoryList({ lang }: { lang: Lang }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['marble-kinds'] }),
   });
 
-  const onSubmitKind = (e: FormEvent<HTMLFormElement>) => {
+  const onSubmitKind = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const editing = kindModal !== 'create' && kindModal ? kindModal : null;
+    let imageUrl = editing?.imageUrl || '';
+    if (imageFile) {
+      imageUrl = await uploadMarbleImage(imageFile);
+    } else if (
+      imagePreview &&
+      !imagePreview.startsWith('blob:') &&
+      imagePreview.startsWith('http')
+    ) {
+      imageUrl = imagePreview;
+    }
     saveKind.mutate({
       id: editing?.id,
       name: String(fd.get('name')),
       color: String(fd.get('color')),
-      imageUrl: imagePreview || editing?.imageUrl || '',
+      imageUrl,
       visible: fd.get('visible') === 'true',
     });
   };
@@ -531,7 +545,7 @@ export function InventoryList({ lang }: { lang: Lang }) {
         </div>
       )}
       {isLoading ? (
-        <div className="py-16 text-center text-sm text-[#5F6B76]">...</div>
+        <PageLoading label={lang === 'ar' ? 'جاري التحميل...' : 'Chargement…'} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {kinds.map((kind) => (
@@ -544,9 +558,9 @@ export function InventoryList({ lang }: { lang: Lang }) {
                 <div
                   className={`marble-surface ${kind.tone === 'dark' ? 'dark' : ''} relative h-36 cursor-pointer`}
                 >
-                  {isImageSource(kind.imageUrl) && (
+                  {resolveMarbleImageUrl(kind.imageUrl) && (
                     <img
-                      src={kind.imageUrl}
+                      src={resolveMarbleImageUrl(kind.imageUrl)}
                       alt={kind.name}
                       className="absolute inset-0 h-full w-full object-cover"
                     />
@@ -574,7 +588,10 @@ export function InventoryList({ lang }: { lang: Lang }) {
                       type="button"
                       data-testid={`button-edit-kind-${kind.id}`}
                       onClick={() => {
-                        setImagePreview(kind.imageUrl);
+                        setImagePreview(
+                          resolveMarbleImageUrl(kind.imageUrl) || kind.imageUrl,
+                        );
+                        setImageFile(null);
                         setKindModal(kind);
                       }}
                       className="rounded p-1.5 text-[#8B949A] hover:bg-[#F1EEE8]"
@@ -632,6 +649,7 @@ export function InventoryList({ lang }: { lang: Lang }) {
           onClose={() => {
             setKindModal(null);
             setImagePreview('');
+            setImageFile(null);
           }}
         >
           <form onSubmit={onSubmitKind} className="space-y-4">
@@ -659,7 +677,10 @@ export function InventoryList({ lang }: { lang: Lang }) {
                   accept="image/*"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) setImagePreview(URL.createObjectURL(file));
+                    if (file) {
+                      setImageFile(file);
+                      setImagePreview(URL.createObjectURL(file));
+                    }
                   }}
                   className="block w-full text-xs"
                 />
@@ -696,7 +717,11 @@ export function InventoryList({ lang }: { lang: Lang }) {
                 {t.cancel}
               </Btn>
               <Btn testId="button-save-kind" type="submit">
-                {t.save}
+                {saveKind.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  t.save
+                )}
               </Btn>
             </div>
           </form>
@@ -725,6 +750,10 @@ export function InventoryKindDetail({ lang }: { lang: Lang }) {
     queryFn: () => api.getMarbleKind(kindId),
     enabled: Boolean(kindId),
   });
+  const { data: suppliers = [] } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: api.getSuppliers,
+  });
 
   const addSlice = useMutation({
     mutationFn: (body: Parameters<typeof api.addMarbleSlice>[1]) =>
@@ -747,14 +776,6 @@ export function InventoryKindDetail({ lang }: { lang: Lang }) {
     },
   });
 
-  const deleteSlice = useMutation({
-    mutationFn: api.deleteMarbleSlice,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['marble-kind', kindId] });
-      qc.invalidateQueries({ queryKey: ['marble-kinds'] });
-    },
-  });
-
   const updateWastes = useMutation({
     mutationFn: ({
       sliceId,
@@ -770,10 +791,15 @@ export function InventoryKindDetail({ lang }: { lang: Lang }) {
     },
   });
 
-  if (isLoading || error || !data) {
+  if (isLoading) {
     return (
-      <div className="py-16 text-center text-sm text-[#5F6B76]">
-        {error ? error.message : '...'}
+      <PageLoading label={lang === 'ar' ? 'جاري التحميل...' : 'Chargement…'} />
+    );
+  }
+  if (error || !data) {
+    return (
+      <div className="py-16 text-center text-sm text-[#D95C55]">
+        {error?.message ?? '—'}
       </div>
     );
   }
@@ -841,64 +867,34 @@ export function InventoryKindDetail({ lang }: { lang: Lang }) {
           </thead>
           <tbody>
             {slices.map((slice) => (
-              <tr key={slice.id} className="border-t border-[#F0EEE9]">
-                <td className="px-4 py-3 font-medium">{slice.supplier.name}</td>
-                <td className="digits-latin px-4 py-3 text-[#5F6B76]">
-                  {formatDimM(slice.lengthM)} × {formatDimM(slice.widthM)} ×{' '}
-                  {formatDimM(slice.thicknessM)}
-                </td>
-                <td className="digits-latin px-4 py-3">
-                  {formatNumber(slice.sliceCount)}
-                </td>
-                <td className="digits-latin px-4 py-3">
-                  {slice.wasteAreaOneSqm > 0
-                    ? formatAreaSqm(slice.wasteAreaOneSqm)
-                    : '—'}
-                </td>
-                <td className="digits-latin px-4 py-3">
-                  {formatAreaSqm(slice.totalAreaSqm)}
-                </td>
-                <td className="mono digits-latin px-4 py-3 text-end">
-                  {formatCurrency(slice.purchasePerSqm, lang)}
-                </td>
-                <td className="mono digits-latin px-4 py-3 text-end">
-                  {formatCurrency(slice.purchaseTotal, lang)}
-                </td>
-                <td className="mono digits-latin px-4 py-3 text-end">
-                  {formatCurrency(slice.sellingPerSqm, lang)}
-                </td>
-                <td className="mono digits-latin px-4 py-3 text-end">
-                  {formatCurrency(slice.sellingTotal, lang)}
-                </td>
-                <td className="px-4 py-3 text-end">
-                  <button
-                    type="button"
-                    data-testid={`button-waste-slice-${slice.id}`}
-                    title={t.waste}
-                    onClick={() => {
-                      setWasteDraft(
-                        slice.wastes.length
-                          ? slice.wastes.map((w) => ({ ...w }))
-                          : [{ lengthM: 0.2, widthM: 0.2 }],
-                      );
-                      setWasteModalSlice(slice);
-                    }}
-                    className="me-2 inline-flex rounded p-1.5 text-[#9B8C77] hover:bg-[#F1EEE8]"
-                  >
-                    <Scissors size={14} />
-                  </button>
-                </td>
-                <td className="px-4 py-3 text-end">
-                  <button
-                    type="button"
-                    data-testid={`button-delete-slice-${slice.id}`}
-                    onClick={() => deleteSlice.mutate(slice.id)}
-                    className="text-[#D95C55] hover:opacity-80"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </td>
-              </tr>
+              <EditableSliceRow
+                key={slice.id}
+                slice={slice}
+                kindId={kindId}
+                lang={lang}
+                suppliers={suppliers}
+                labels={{
+                  supplier: t.supplier,
+                  dimensions: t.dimensions,
+                  count: t.count,
+                  wasteArea: t.wasteArea,
+                  netArea: t.netArea,
+                  purchasePerSqm: t.purchasePerSqm,
+                  purchaseTotal: t.purchaseTotal,
+                  sellingPerSqm: t.sellingPerSqm,
+                  sellingTotal: t.sellingTotal,
+                  waste: t.waste,
+                  delete: t.delete,
+                }}
+                onEditWaste={(s) => {
+                  setWasteDraft(
+                    s.wastes.length
+                      ? s.wastes.map((w) => ({ ...w }))
+                      : [{ lengthM: 0.2, widthM: 0.2 }],
+                  );
+                  setWasteModalSlice(s);
+                }}
+              />
             ))}
           </tbody>
         </table>

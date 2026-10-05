@@ -252,6 +252,11 @@ router.patch("/slices/:sliceId", async (req, res, next) => {
     const body = req.body as Record<string, unknown>;
     const data: Record<string, unknown> = { ...body };
 
+    if (typeof body.supplierId === "string") {
+      data.supplier = { connect: { id: body.supplierId } };
+      delete data.supplierId;
+    }
+
     if (body.wastes !== undefined) {
       data.wastes = parseWastes(body.wastes);
     }

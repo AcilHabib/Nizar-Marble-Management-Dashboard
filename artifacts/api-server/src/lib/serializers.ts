@@ -1,4 +1,5 @@
 import type { Deposit, Order, StaffMember } from "@workspace/db";
+import { normalizeOrderStatus } from "./order-status";
 
 function formatDisplayDate(date: Date): string {
   return date.toLocaleDateString("en-US", {
@@ -21,6 +22,7 @@ export type OrderDto = {
   kind: string;
   total: number;
   paid: number;
+  remaining: number;
   status: string;
   staff: string;
   dimensions?: string | null;
@@ -44,7 +46,8 @@ export function serializeOrder(
     kind: order.kind,
     total: order.total,
     paid,
-    status: order.status,
+    remaining: Math.max(order.total - paid, 0),
+    status: normalizeOrderStatus(order.status),
     staff: order.staff,
     dimensions: order.dimensions,
     thickness: order.thickness,

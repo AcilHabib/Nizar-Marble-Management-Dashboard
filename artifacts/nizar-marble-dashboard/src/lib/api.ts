@@ -1,4 +1,8 @@
 import { staffActorHeaders } from '@/lib/api-client';
+import type { OrderStatus } from '@/lib/order-status';
+
+export type { OrderStatus } from '@/lib/order-status';
+export { ORDER_STATUSES, normalizeOrderStatus } from '@/lib/order-status';
 
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
 
@@ -24,8 +28,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export type OrderStatus = 'مؤكد' | 'قيد التنفيذ' | 'تم التسليم' | 'ملغى';
-
 export type OrderPiece = {
   kind: string;
   dims: string;
@@ -48,6 +50,7 @@ export type Order = {
   kind: string;
   total: number;
   paid: number;
+  remaining: number;
   status: OrderStatus;
   staff: string;
   dimensions?: string | null;
@@ -209,6 +212,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateOrder: (
+    orderNumber: string,
+    body: { status?: OrderStatus; orderNumber?: string },
+  ) =>
+    request<Order>(`/orders/${orderNumber}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteOrder: (orderNumber: string) =>
+    request<void>(`/orders/${orderNumber}`, { method: 'DELETE' }),
+  uploadMarbleImage: async (file: File) => {
+    const { uploadMarbleImage } = await import('@/lib/marble-image');
+    return uploadMarbleImage(file);
+  },
   getSuppliers: () => request<Supplier[]>('/suppliers'),
   createSupplier: (body: Omit<Supplier, 'id'>) =>
     request<Supplier>('/suppliers', {
@@ -261,6 +278,12 @@ export const api = {
     body: Partial<{
       wastes: SliceWasteRect[];
       sliceCount: number;
+      lengthM: number;
+      widthM: number;
+      thicknessM: number;
+      purchasePerSqm: number;
+      sellingPerSqm: number;
+      supplierId: string;
     }>,
   ) =>
     request<MarbleSlice>(`/marble-kinds/slices/${sliceId}`, {

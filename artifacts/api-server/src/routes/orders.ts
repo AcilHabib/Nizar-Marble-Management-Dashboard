@@ -9,22 +9,12 @@ import {
   serializeOrder,
   paidTotal,
 } from "../lib/serializers";
+import { nextOrderNumber, resolveUniqueOrderNumber } from "../lib/order-number";
+import { isOrderStatus, normalizeOrderStatus } from "../lib/order-status";
 import { recordStaffAction } from "../lib/staff-action";
 import { actorFromRequest } from "../middleware/staff-actor";
 
 const router: IRouter = Router();
-
-async function nextOrderNumber(): Promise<string> {
-  const latest = await prisma.order.findFirst({
-    orderBy: { orderNumber: "desc" },
-    select: { orderNumber: true },
-  });
-  if (!latest?.orderNumber?.startsWith("NZ-")) {
-    return "NZ-2481";
-  }
-  const num = Number(latest.orderNumber.replace("NZ-", ""));
-  return `NZ-${Number.isFinite(num) ? num + 1 : 2481}`;
-}
 
 function formatDims(cutLengthM: number, cutWidthM: number, thicknessM: number) {
   return `${cutLengthM} × ${cutWidthM} × ${thicknessM} m`;
@@ -73,7 +63,7 @@ router.post("/", async (req, res, next) => {
     const actor = actorFromRequest(req);
     const {
       customerId,
-      status = "مؤكد",
+      status = "مؤكدة",
       lines = [],
       edgeRoundingPrice = 0,
     } = req.body as {
@@ -210,7 +200,7 @@ router.post("/", async (req, res, next) => {
       const kind =
         [...new Set(pieces.map((p) => p.kind))].filter(Boolean).join("، ") ||
         "—";
-      const orderNumber = await nextOrderNumber();
+      const orderNumber = await nextOrderNumber(tx);
 
       return tx.order.create({
         data: {
@@ -221,7 +211,7 @@ router.post("/", async (req, res, next) => {
           total,
           linesSubtotal,
           edgeRoundingPrice: edgesPrice,
-          status,
+          status: normalizeOrderStatus(String(status)),
           staff: actor.staffName,
           pieces,
           dimensions: pieces[0]?.dims,
@@ -292,14 +282,101 @@ router.post("/:orderNumber/deposits", async (req, res, next) => {
       where: { orderId: order.id },
     });
     const paid = paidTotal(deposits);
-    if (paid >= order.total && order.status !== "تم التسليم") {
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { status: "قيد التنفيذ" },
-      });
+    res.status(201).json(serializeDeposit(deposit));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch("/:orderNumber", async (req, res, next) => {
+  try {
+    const order = await prisma.order.findUnique({
+      where: { orderNumber: req.params.orderNumber },
+    });
+    if (!order) {
+      res.status(404).json({ error: "Order not found" });
+      return;
     }
 
-    res.status(201).json(serializeDeposit(deposit));
+    const body = req.body as { status?: string; orderNumber?: string };
+    const data: { status?: string; orderNumber?: string } = {};
+
+    if (body.status !== undefined) {
+      const normalized = normalizeOrderStatus(String(body.status));
+      if (!isOrderStatus(normalized)) {
+        res.status(400).json({ error: "Invalid order status" });
+        return;
+      }
+      data.status = normalized;
+    }
+
+    if (body.orderNumber !== undefined) {
+      const desired = String(body.orderNumber).trim();
+      data.orderNumber = await resolveUniqueOrderNumber(
+        prisma,
+        desired,
+        order.id,
+      );
+    }
+
+    if (Object.keys(data).length === 0) {
+      res.status(400).json({ error: "No valid fields to update" });
+      return;
+    }
+
+    const updated = await prisma.order.update({
+      where: { id: order.id },
+      data,
+      include: { deposits: true },
+    });
+
+    await recordStaffAction(
+      actorFromRequest(req),
+      "order.update",
+      `${updated.orderNumber}`,
+    );
+
+    res.json(serializeOrder(updated));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete("/:orderNumber", async (req, res, next) => {
+  try {
+    const order = await prisma.order.findUnique({
+      where: { orderNumber: req.params.orderNumber },
+    });
+    if (!order) {
+      res.status(404).json({ error: "Order not found" });
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      for (const piece of order.pieces) {
+        if (!piece.sliceId) continue;
+        const cutLen = piece.cutLengthM ?? 0;
+        const cutWid = piece.cutWidthM ?? 0;
+        const qty = piece.qty ?? 1;
+        if (cutLen <= 0 || cutWid <= 0) continue;
+        const area = cutAreaSqm(cutLen, cutWid, qty);
+        await tx.marbleSlice.updateMany({
+          where: { id: piece.sliceId },
+          data: {
+            consumedNetAreaSqm: { decrement: area },
+          },
+        });
+      }
+      await tx.order.delete({ where: { id: order.id } });
+    });
+
+    await recordStaffAction(
+      actorFromRequest(req),
+      "order.delete",
+      order.orderNumber,
+    );
+
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

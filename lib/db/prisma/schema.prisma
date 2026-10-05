@@ -80,6 +80,14 @@ model Supplier {
   createdAt DateTime      @default(now())
 }
 
+model MarbleImage {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  contentType String
+  filename    String   @default("")
+  data        Bytes
+  createdAt   DateTime @default(now())
+}
+
 model MarbleKind {
   id        String        @id @default(auto()) @map("_id") @db.ObjectId
   name      String
