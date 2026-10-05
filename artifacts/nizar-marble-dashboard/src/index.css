@@ -121,15 +121,15 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   border-bottom: 1px solid #E7E5E0;
 }
 .receipt-header-logo {
-  height: 4rem;
+  height: 5rem;
   width: auto;
-  max-width: 140px;
+  max-width: 160px;
   object-fit: contain;
 }
 .receipt-header-text {
   flex: 1;
   text-align: right;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   line-height: 1.45;
   color: #17212B;
 }
@@ -141,13 +141,13 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 }
 .receipt-title {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 1.375rem;
   font-weight: 700;
   color: #17212B;
 }
 .receipt-meta {
   margin: 0.35rem 0 0;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   color: #5F6B76;
 }
 .receipt-info-grid {
@@ -155,7 +155,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   grid-template-columns: 1fr 1fr;
   gap: 0.65rem 1.5rem;
   margin: 0 0 1.25rem;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
 }
 .receipt-info-grid dt {
   margin: 0;
@@ -170,13 +170,13 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .receipt-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   margin-bottom: 1.25rem;
 }
 .receipt-table th,
 .receipt-table td {
   border: 1px solid #E7E5E0;
-  padding: 0.45rem 0.5rem;
+  padding: 0.55rem 0.65rem;
   text-align: start;
 }
 .receipt-table th:last-child,
@@ -189,9 +189,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   font-weight: 600;
 }
 .receipt-totals {
-  max-width: 280px;
+  max-width: 320px;
   margin-inline-start: auto;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
 }
 .receipt-total-row {
   display: flex;
@@ -207,15 +207,41 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   font-weight: 700;
   color: #17212B;
 }
+.receipt-total-row--stack {
+  align-items: flex-start;
+}
+.receipt-total-detail {
+  margin-bottom: 0.15rem;
+  max-width: 14rem;
+  line-height: 1.35;
+}
 .receipt-payments {
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px dashed #E7E5E0;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
 }
 .receipt-payments h2 {
   margin: 0 0 0.5rem;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
+}
+.receipt-stamp {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #E7E5E0;
+}
+.receipt-stamp-label {
+  margin: 0 0 0.65rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #5F6B76;
+}
+.receipt-stamp-box {
+  min-height: 100px;
+  max-width: 220px;
+  border: 2px dashed #CFC3AE;
+  border-radius: 8px;
+  background: #FBFAF8;
 }
 .receipt-payments ul {
   margin: 0;
@@ -236,6 +262,13 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   }
   .order-receipt-print {
     display: block !important;
+    max-width: 190mm;
+    margin: 0 auto;
+    font-size: 11.5pt;
+    line-height: 1.45;
+  }
+  .receipt-stamp-box {
+    min-height: 110px;
   }
   html,
   body {

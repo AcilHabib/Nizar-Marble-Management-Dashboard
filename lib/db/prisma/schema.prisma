@@ -39,8 +39,10 @@ model Order {
   orderDate          DateTime     @default(now())
   kind               String
   total              Int
-  linesSubtotal      Int          @default(0)
-  edgeRoundingPrice  Int          @default(0)
+  linesSubtotal           Int     @default(0)
+  edgeRoundingPrice       Int     @default(0)
+  edgeRoundingPricePerM   Int     @default(0)
+  edgeRoundingMeters      Float[] @default([])
   status             String
   staff              String
   dimensions         String?

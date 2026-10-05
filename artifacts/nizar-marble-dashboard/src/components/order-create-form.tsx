@@ -13,6 +13,7 @@ import {
   formatCurrency,
   formatNumber,
 } from '@/lib/format';
+import { computeEdgeRoundingTotal } from '@/lib/edge-rounding';
 
 type Lang = 'ar' | 'fr';
 
@@ -33,7 +34,11 @@ const labels = {
     qty: 'الكمية',
     lineTotal: 'سعر البيع',
     available: 'متاح',
-    edgeRounding: 'تشطيب الحواف (يدوي)',
+    edgeRounding: 'تشطيب الحواف',
+    pricePerMeter: 'سعر المتر (د.ج)',
+    lengthMeters: 'الطول (م)',
+    addLength: 'إضافة طول',
+    edgeRoundingTotal: 'مجموع تشطيب الحواف',
     slicesSubtotal: 'مجموع القطع',
     orderTotal: 'إجمالي الطلب',
     cancel: 'إلغاء',
@@ -61,7 +66,11 @@ const labels = {
     qty: 'Quantité',
     lineTotal: 'Prix vente',
     available: 'Dispo',
-    edgeRounding: 'Finition des chants (manuel)',
+    edgeRounding: 'Finition des chants',
+    pricePerMeter: 'Prix au mètre (DA)',
+    lengthMeters: 'Longueur (m)',
+    addLength: 'Ajouter une longueur',
+    edgeRoundingTotal: 'Total finition chants',
     slicesSubtotal: 'Sous-total pièces',
     orderTotal: 'Total commande',
     cancel: 'Annuler',
@@ -175,7 +184,8 @@ export function OrderCreateForm({
   const [customerId, setCustomerId] = useState('');
   const [customerModal, setCustomerModal] = useState(false);
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
-  const [edgeRoundingPrice, setEdgeRoundingPrice] = useState(0);
+  const [edgePricePerM, setEdgePricePerM] = useState(0);
+  const [edgeMeters, setEdgeMeters] = useState<number[]>([0]);
   const [submitError, setSubmitError] = useState('');
 
   const { data: customers = [] } = useQuery({
@@ -241,6 +251,7 @@ export function OrderCreateForm({
     (sum, line) => sum + computeLinePrice(line, sliceById.get(line.sliceId)),
     0,
   );
+  const edgeRoundingPrice = computeEdgeRoundingTotal(edgePricePerM, edgeMeters);
   const orderTotal = linesSubtotal + edgeRoundingPrice;
 
   const warnings = lines.map((line, index) => {
@@ -290,7 +301,8 @@ export function OrderCreateForm({
     createOrder.mutate({
       customerId,
       lines: payload,
-      edgeRoundingPrice,
+      edgeRoundingPricePerM: edgePricePerM,
+      edgeRoundingMeters: edgeMeters,
     });
   };
 
@@ -442,17 +454,81 @@ export function OrderCreateForm({
           </div>
         </div>
 
-        <label className="block text-xs font-semibold">
-          {t.edgeRounding}
-          <input
-            data-testid="input-edge-rounding"
-            type="number"
-            min={0}
-            value={edgeRoundingPrice || ''}
-            onChange={(e) => setEdgeRoundingPrice(Number(e.target.value) || 0)}
-            className="digits-latin mt-1.5 h-10 w-full rounded-lg border border-[#E7E5E0] bg-white px-3 text-xs"
-          />
-        </label>
+        <div className="rounded-lg border border-[#E7E5E0] bg-white p-4">
+          <h3 className="mb-4 text-xs font-bold">{t.edgeRounding}</h3>
+          <label className="mb-4 block text-[10px] font-semibold">
+            {t.pricePerMeter}
+            <input
+              data-testid="input-edge-price-per-meter"
+              type="number"
+              min={0}
+              step={1}
+              value={edgePricePerM || ''}
+              onChange={(e) => setEdgePricePerM(Number(e.target.value) || 0)}
+              className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+            />
+          </label>
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-[10px] font-semibold text-[#5F6B76]">
+              {t.lengthMeters}
+            </span>
+            <button
+              type="button"
+              data-testid="button-add-edge-length"
+              onClick={() => setEdgeMeters([...edgeMeters, 0])}
+              className="inline-flex items-center gap-1 rounded-md bg-[#F1EEE8] px-2.5 py-2 text-[10px] font-bold text-[#6E665B] hover:bg-[#E5DED2]"
+            >
+              <Plus size={13} /> {t.addLength}
+            </button>
+          </div>
+          <div className="space-y-2">
+            {edgeMeters.map((meters, index) => (
+              <div key={index} className="flex items-end gap-2">
+                <label className="flex-1 text-[10px] font-semibold">
+                  <span className="mono digits-latin text-[#9B8C77]">
+                    #{formatNumber(index + 1)}
+                  </span>
+                  <input
+                    data-testid={`input-edge-meters-${index}`}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={meters || ''}
+                    onChange={(e) =>
+                      setEdgeMeters(
+                        edgeMeters.map((v, i) =>
+                          i === index ? Number(e.target.value) || 0 : v,
+                        ),
+                      )
+                    }
+                    className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+                  />
+                </label>
+                {edgeMeters.length > 1 && (
+                  <button
+                    type="button"
+                    data-testid={`button-remove-edge-length-${index}`}
+                    onClick={() =>
+                      setEdgeMeters(edgeMeters.filter((_, i) => i !== index))
+                    }
+                    className="mb-1 text-[#D95C55]"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-between border-t border-[#E7E5E0] pt-3 text-[11px]">
+            <span className="text-[#5F6B76]">{t.edgeRoundingTotal}</span>
+            <b
+              data-testid="text-edge-rounding-total"
+              className="mono digits-latin"
+            >
+              {formatCurrency(edgeRoundingPrice, lang)}
+            </b>
+          </div>
+        </div>
 
         <div className="space-y-2 rounded-lg border border-[#E7E5E0] bg-white p-4 text-xs">
           <div className="flex justify-between text-[#5F6B76]">

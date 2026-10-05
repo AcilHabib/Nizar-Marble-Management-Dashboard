@@ -375,8 +375,18 @@ export function InventoryList({ lang }: { lang: Lang }) {
       visible: boolean;
     }) =>
       payload.id
-        ? api.updateMarbleKind(payload.id, payload)
-        : api.createMarbleKind(payload),
+        ? api.updateMarbleKind(payload.id, {
+            name: payload.name,
+            color: payload.color,
+            imageUrl: payload.imageUrl,
+            visible: payload.visible,
+          })
+        : api.createMarbleKind({
+            name: payload.name,
+            color: payload.color,
+            imageUrl: payload.imageUrl,
+            visible: payload.visible,
+          }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['marble-kinds'] });
       setKindModal(null);

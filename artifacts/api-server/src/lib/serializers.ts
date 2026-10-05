@@ -30,6 +30,8 @@ export type OrderDto = {
   edges?: string | null;
   linesSubtotal: number;
   edgeRoundingPrice: number;
+  edgeRoundingPricePerM: number;
+  edgeRoundingMeters: number[];
   pieces: Order["pieces"];
 };
 
@@ -54,6 +56,8 @@ export function serializeOrder(
     edges: order.edges,
     linesSubtotal: order.linesSubtotal ?? order.total,
     edgeRoundingPrice: order.edgeRoundingPrice ?? 0,
+    edgeRoundingPricePerM: order.edgeRoundingPricePerM ?? 0,
+    edgeRoundingMeters: order.edgeRoundingMeters ?? [],
     pieces: order.pieces,
   };
 }

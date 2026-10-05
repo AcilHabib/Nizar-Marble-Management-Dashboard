@@ -113,9 +113,17 @@ router.post("/", async (req, res, next) => {
 
 router.patch("/:id", async (req, res, next) => {
   try {
+    const body = req.body as Record<string, unknown>;
+    const data: Record<string, unknown> = {};
+    if (typeof body.name === "string") data.name = body.name.trim();
+    if (typeof body.color === "string") data.color = body.color;
+    if (typeof body.imageUrl === "string") data.imageUrl = body.imageUrl;
+    if (body.visible !== undefined) data.visible = Boolean(body.visible);
+    if (typeof body.tone === "string") data.tone = body.tone;
+
     const kind = await prisma.marbleKind.update({
       where: { id: req.params.id },
-      data: req.body,
+      data,
       include: { slices: { include: sliceInclude } },
     });
     await recordStaffAction(

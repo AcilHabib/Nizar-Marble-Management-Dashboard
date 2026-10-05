@@ -1,5 +1,11 @@
 import type { Deposit, Order, OrderPiece } from '@/lib/api';
 import { formatCurrency, formatNumber } from '@/lib/format';
+import { formatEdgeRoundingBreakdown } from '@/lib/edge-rounding';
+import {
+  formatReceiptDate,
+  translateOrderStatus,
+  translatePaymentMethod,
+} from '@/lib/receipt-i18n';
 import type { ReceiptHeaderLines } from '@/lib/receipt-header';
 
 const logoUrl = `${import.meta.env.BASE_URL}nizar-marble-logo.png`;
@@ -20,6 +26,8 @@ const labels = {
     status: 'الحالة',
     marble: 'الرخام',
     dimensions: 'الأبعاد',
+    thickness: 'السماكة',
+    edges: 'الحواف',
     qty: 'الكمية',
     amount: 'المبلغ',
     slicesSubtotal: 'مجموع القطع',
@@ -28,6 +36,7 @@ const labels = {
     paid: 'المدفوع',
     remaining: 'المتبقي',
     payments: 'الدفعات',
+    companyStamp: 'ختم الشركة',
   },
   fr: {
     receipt: 'Reçu',
@@ -38,6 +47,8 @@ const labels = {
     status: 'Statut',
     marble: 'Marbre',
     dimensions: 'Dimensions',
+    thickness: 'Épaisseur',
+    edges: 'Chants',
     qty: 'Qté',
     amount: 'Montant',
     slicesSubtotal: 'Sous-total pièces',
@@ -46,6 +57,7 @@ const labels = {
     paid: 'Payé',
     remaining: 'Restant',
     payments: 'Paiements',
+    companyStamp: 'Cachet de l’entreprise',
   },
 };
 
@@ -55,26 +67,30 @@ export function OrderReceiptPrint({
   deposits,
   paid,
   headerLines,
-  statusLabel,
-  formatDate,
 }: {
   lang: Lang;
   order: Order;
   deposits: Deposit[];
   paid: number;
   headerLines: ReceiptHeaderLines;
-  statusLabel: string;
-  formatDate: (d: string) => string;
 }) {
   const t = labels[lang];
   const remaining = Math.max(order.total - paid, 0);
   const pieces = order.pieces.length > 0 ? order.pieces : [];
+  const orderRef = order.orderNumber || order.id;
+  const statusText = translateOrderStatus(order.status, lang);
+  const orderDateText = formatReceiptDate(order.date, lang, order.orderDate);
+  const edgeRoundingDetail = formatEdgeRoundingBreakdown(
+    order.edgeRoundingPricePerM ?? 0,
+    order.edgeRoundingMeters ?? [],
+    lang,
+  );
 
   return (
     <article className="order-receipt-print" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
       <header className="receipt-header" dir="ltr">
         <img src={logoUrl} alt="" className="receipt-header-logo" />
-        <div className="receipt-header-text">
+        <div className="receipt-header-text" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
           {headerLines.map((line, i) =>
             line.trim() ? <p key={i}>{line}</p> : null,
           )}
@@ -83,9 +99,9 @@ export function OrderReceiptPrint({
 
       <div className="receipt-title-row">
         <h1 className="receipt-title">
-          {t.receipt} · {t.order} {order.id}
+          {t.receipt} · {t.order} {orderRef}
         </h1>
-        <p className="receipt-meta digits-latin">{formatDate(order.date)}</p>
+        <p className="receipt-meta digits-latin">{orderDateText}</p>
       </div>
 
       <dl className="receipt-info-grid">
@@ -94,17 +110,33 @@ export function OrderReceiptPrint({
           <dd>{order.customer}</dd>
         </div>
         <div>
+          <dt>{t.date}</dt>
+          <dd className="digits-latin">{orderDateText}</dd>
+        </div>
+        <div>
           <dt>{t.staff}</dt>
           <dd>{order.staff}</dd>
         </div>
         <div>
           <dt>{t.status}</dt>
-          <dd>{statusLabel}</dd>
+          <dd>{statusText}</dd>
         </div>
         <div>
           <dt>{t.marble}</dt>
           <dd>{order.kind}</dd>
         </div>
+        {order.dimensions ? (
+          <div>
+            <dt>{t.dimensions}</dt>
+            <dd className="digits-latin">{order.dimensions}</dd>
+          </div>
+        ) : null}
+        {order.thickness ? (
+          <div>
+            <dt>{t.thickness}</dt>
+            <dd className="digits-latin">{order.thickness}</dd>
+          </div>
+        ) : null}
       </dl>
 
       <table className="receipt-table">
@@ -138,9 +170,14 @@ export function OrderReceiptPrint({
               </span>
             </div>
             {order.edgeRoundingPrice > 0 && (
-              <div className="receipt-total-row">
+              <div className="receipt-total-row receipt-total-row--stack">
                 <span>{t.edgeRounding}</span>
-                <span className="digits-latin">
+                <span className="digits-latin text-end">
+                  {edgeRoundingDetail && (
+                    <span className="receipt-total-detail block text-[0.85em] font-normal text-[#5F6B76]">
+                      {edgeRoundingDetail}
+                    </span>
+                  )}
                   {formatCurrency(order.edgeRoundingPrice, lang)}
                 </span>
               </div>
@@ -167,13 +204,19 @@ export function OrderReceiptPrint({
           <ul>
             {deposits.map((d) => (
               <li key={d.id} className="digits-latin">
-                {formatDate(d.date)} — {d.method} —{' '}
+                {formatReceiptDate(d.date, lang, d.depositDate)} —{' '}
+                {translatePaymentMethod(d.method, lang)} —{' '}
                 {formatCurrency(d.amount, lang)}
               </li>
             ))}
           </ul>
         </section>
       )}
+
+      <footer className="receipt-stamp">
+        <p className="receipt-stamp-label">{t.companyStamp}</p>
+        <div className="receipt-stamp-box" aria-hidden="true" />
+      </footer>
     </article>
   );
 }

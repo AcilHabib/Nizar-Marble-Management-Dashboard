@@ -13,6 +13,11 @@ import { nextOrderNumber, resolveUniqueOrderNumber } from "../lib/order-number";
 import { isOrderStatus, normalizeOrderStatus } from "../lib/order-status";
 import { recordStaffAction } from "../lib/staff-action";
 import { actorFromRequest } from "../middleware/staff-actor";
+import {
+  computeEdgeRoundingTotal,
+  formatOrderEdgesSummary,
+  normalizeEdgeMeters,
+} from "../lib/edge-rounding";
 
 const router: IRouter = Router();
 
@@ -65,12 +70,16 @@ router.post("/", async (req, res, next) => {
       customerId,
       status = "مؤكدة",
       lines = [],
-      edgeRoundingPrice = 0,
+      edgeRoundingPrice,
+      edgeRoundingPricePerM = 0,
+      edgeRoundingMeters = [],
     } = req.body as {
       customerId?: string;
       status?: string;
       lines?: OrderLineInput[];
       edgeRoundingPrice?: number;
+      edgeRoundingPricePerM?: number;
+      edgeRoundingMeters?: number[];
     };
 
     if (!customerId || typeof customerId !== "string") {
@@ -113,7 +122,16 @@ router.post("/", async (req, res, next) => {
       }
     }
 
-    const edgesPrice = Math.max(0, Math.round(Number(edgeRoundingPrice) || 0));
+    const pricePerM = Math.max(0, Math.round(Number(edgeRoundingPricePerM) || 0));
+    const meters = normalizeEdgeMeters(edgeRoundingMeters);
+    let edgesPrice = computeEdgeRoundingTotal(pricePerM, meters);
+    if (
+      edgesPrice === 0 &&
+      edgeRoundingPrice !== undefined &&
+      edgeRoundingPrice !== null
+    ) {
+      edgesPrice = Math.max(0, Math.round(Number(edgeRoundingPrice) || 0));
+    }
 
     const order = await prisma.$transaction(async (tx) => {
       const usageBySlice = new Map<string, number>();
@@ -211,6 +229,8 @@ router.post("/", async (req, res, next) => {
           total,
           linesSubtotal,
           edgeRoundingPrice: edgesPrice,
+          edgeRoundingPricePerM: edgesPrice > 0 ? pricePerM : 0,
+          edgeRoundingMeters: edgesPrice > 0 ? meters : [],
           status: normalizeOrderStatus(String(status)),
           staff: actor.staffName,
           pieces,
@@ -218,7 +238,7 @@ router.post("/", async (req, res, next) => {
           thickness: pieces[0]?.thickness,
           edges:
             edgesPrice > 0
-              ? `${edgesPrice} د.ج`
+              ? formatOrderEdgesSummary(pricePerM, meters, edgesPrice)
               : pieces[0]?.edges,
         },
         include: { deposits: true },

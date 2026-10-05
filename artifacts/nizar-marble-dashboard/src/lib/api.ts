@@ -47,6 +47,7 @@ export type Order = {
   orderNumber: string;
   customer: string;
   date: string;
+  orderDate?: string;
   kind: string;
   total: number;
   paid: number;
@@ -58,6 +59,8 @@ export type Order = {
   edges?: string | null;
   linesSubtotal: number;
   edgeRoundingPrice: number;
+  edgeRoundingPricePerM?: number;
+  edgeRoundingMeters?: number[];
   pieces: OrderPiece[];
 };
 
@@ -81,6 +84,7 @@ export type Deposit = {
   method: string;
   recordedBy?: string;
   date: string;
+  depositDate?: string;
 };
 
 export type Supplier = {
@@ -195,10 +199,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateCustomer: (id: string, body: Partial<Omit<Customer, 'id'>>) =>
+    request<Customer>(`/customers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteCustomer: (id: string) =>
+    request<void>(`/customers/${id}`, { method: 'DELETE' }),
   createOrder: (body: {
     customerId: string;
     lines: OrderCutLine[];
-    edgeRoundingPrice?: number;
+    edgeRoundingPricePerM?: number;
+    edgeRoundingMeters?: number[];
   }) =>
     request<Order>('/orders', {
       method: 'POST',

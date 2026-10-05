@@ -1,9 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { StaffAccountMenu } from '@/components/staff-account-menu';
+import { CustomersManagerModal } from '@/components/customers-manager-modal';
 import { OrderCreateForm } from '@/components/order-create-form';
 import { ActiveStaffProvider, useActiveStaff } from '@/lib/active-staff';
 import { OrderReceiptPrint } from '@/components/order-receipt-print';
+import {
+  ReceiptPrintModal,
+  type ReceiptDocLang,
+} from '@/components/receipt-print-modal';
 import { ReceiptHeaderSettingsModal } from '@/components/receipt-header';
 import {
   loadReceiptHeaderLines,
@@ -20,6 +25,7 @@ import {
 } from '@/lib/api';
 import { statusLabelFr, statusStyle } from '@/lib/order-status';
 import { formatAreaSqm, formatCurrency, formatNumber } from '@/lib/format';
+import { formatEdgeRoundingSummary } from '@/lib/edge-rounding';
 import { InventoryKindDetail, InventoryList } from '@/pages/inventory-page';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -58,6 +64,7 @@ const copy = {
     activity: 'حركة المصنع', ordersThisMonth: 'طلبات هذا الشهر', all: 'الكل', confirmed: 'مؤكدة', inProgress: 'قيد التنفيذ',
     ready: 'جاهزة', delivered: 'تم التسليم', canceled: 'ملغاة', noOrders: 'لا توجد طلبات مطابقة', createOrder: 'إنشاء طلب جديد',
     deleteOrder: 'حذف الطلب', confirmDeleteOrder: 'حذف هذا الطلب؟ سيتم استرجاع المخزون المستهلك.',
+    manageCustomers: 'العملاء',
     customerOrCompany: 'اسم العميل أو الشركة', orderPieces: 'قطع الطلب', pieceHint: 'أضف كل قطعة ومواصفاتها لحساب الإجمالي بدقة',
     addPiece: 'إضافة قطعة', piece: 'قطعة', marbleKind: 'نوع الرخام', thickness: 'السماكة', quantityShort: 'الكمية',
     piecePrice: 'سعر القطعة', estimatedTotal: 'الإجمالي التقديري', saveOrder: 'حفظ الطلب',
@@ -101,6 +108,7 @@ const copy = {
     activity: 'Activité de l’atelier', ordersThisMonth: 'commandes ce mois', all: 'Toutes', confirmed: 'Confirmée', inProgress: 'En cours',
     ready: 'Prête', delivered: 'Livrée', canceled: 'Annulée', noOrders: 'Aucune commande correspondante', createOrder: 'Créer une commande',
     deleteOrder: 'Supprimer', confirmDeleteOrder: 'Supprimer cette commande ? Le stock consommé sera restauré.',
+    manageCustomers: 'Clients',
     customerOrCompany: 'Nom du client ou de l’entreprise', orderPieces: 'Pièces de la commande', pieceHint: 'Ajoutez chaque pièce pour calculer le total avec précision',
     addPiece: 'Ajouter une pièce', piece: 'Pièce', marbleKind: 'Type de marbre', thickness: 'Épaisseur', quantityShort: 'Quantité',
     piecePrice: 'Prix de la pièce', estimatedTotal: 'Total estimé', saveOrder: 'Enregistrer la commande',
@@ -179,7 +187,7 @@ function AppShell({ children, lang, setLang }: { children: ReactNode; lang: Lang
         <img
           src={logoUrl}
           alt={lang === 'ar' ? 'شعار نزار للرخام' : 'Logo Nizar Marble'}
-          className="h-11 w-11 shrink-0 rounded-[11px] object-cover ring-1 ring-[#CFC3AE]/40"
+          className="h-11 w-11 shrink-0 rounded-[11px] bg-white object-contain p-0.5 ring-1 ring-[#CFC3AE]/40"
           width={44}
           height={44}
         />
@@ -201,7 +209,7 @@ function AppShell({ children, lang, setLang }: { children: ReactNode; lang: Lang
     {mobileOpen && <button aria-label="إغلاق القائمة" data-testid="button-close-menu" onClick={() => setMobileOpen(false)} className="no-print fixed inset-0 z-30 bg-[#17212B]/35 md:hidden" />}
     <main className="min-w-0 flex-1">
       <header className="no-print sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-[#E7E5E0] bg-[#F8F8F6]/95 px-4 backdrop-blur md:px-8">
-        <div className="flex items-center gap-3"><button data-testid="button-open-menu" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 hover:bg-[#E7E5E0] md:hidden"><Menu size={20} /></button><img src={logoUrl} alt="" aria-hidden className="h-8 w-8 rounded-lg object-cover md:hidden" width={32} height={32} /><div className="hidden text-[11px] text-[#5F6B76] md:block">{t.date}</div></div>
+        <div className="flex items-center gap-3"><button data-testid="button-open-menu" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 hover:bg-[#E7E5E0] md:hidden"><Menu size={20} /></button><img src={logoUrl} alt="" aria-hidden className="h-8 w-8 rounded-lg bg-white object-contain p-0.5 md:hidden" width={32} height={32} /><div className="hidden text-[11px] text-[#5F6B76] md:block">{t.date}</div></div>
         <div className="flex items-center gap-2.5">
           <button data-testid="button-language-toggle" onClick={() => setLang(lang === 'ar' ? 'fr' : 'ar')} className="rounded-md border border-[#E7E5E0] bg-white px-3 py-1.5 text-[11px] font-bold text-[#3A3D3F] transition hover:border-[#CFC3AE]">{lang === 'ar' ? 'FR' : 'AR'}</button>
           <button data-testid="button-notifications" className="relative rounded-md p-2 text-[#5F6B76] transition hover:bg-[#E7E5E0]"><Bell size={18} strokeWidth={1.7} /><span className="absolute end-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#D95C55]" /></button>
@@ -268,6 +276,7 @@ function Orders({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
   const { data: orders = [], isLoading, error } = useQuery({ queryKey: ['orders'], queryFn: api.getOrders });
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState(false);
+  const [customersOpen, setCustomersOpen] = useState(false);
   const [status, setStatus] = useState<Status | 'الكل'>('الكل');
   const filtered = orders.filter(
     (o) =>
@@ -286,9 +295,19 @@ function Orders({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
         title={lang === 'ar' ? 'الطلبات' : t.orders}
         description={`${orders.length} ${t.ordersThisMonth}`}
         action={
-          <Button testId="button-create-order" onClick={openCreate} variant="dark" icon={<Plus size={15} />}>
-            {t.newOrder}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              testId="button-manage-customers"
+              onClick={() => setCustomersOpen(true)}
+              variant="outline"
+              icon={<Users size={15} />}
+            >
+              {t.manageCustomers}
+            </Button>
+            <Button testId="button-create-order" onClick={openCreate} variant="dark" icon={<Plus size={15} />}>
+              {t.newOrder}
+            </Button>
+          </div>
         }
       />
       <DataStatus loading={isLoading} error={error} />
@@ -352,6 +371,9 @@ function Orders({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
       {modal && (
         <OrderCreateForm lang={lang} title={t.createOrder} onClose={() => setModal(false)} />
       )}
+      {customersOpen && (
+        <CustomersManagerModal lang={lang} onClose={() => setCustomersOpen(false)} />
+      )}
     </AppShell>
   );
 }
@@ -395,6 +417,8 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
     loadReceiptHeaderLines(),
   );
   const [headerModal, setHeaderModal] = useState(false);
+  const [printModal, setPrintModal] = useState(false);
+  const [receiptDocLang, setReceiptDocLang] = useState<ReceiptDocLang>('ar');
   useEffect(() => {
     if (data?.order.orderNumber && data.order.orderNumber !== orderId) {
       setLocation(`/orders/${data.order.orderNumber}`);
@@ -407,6 +431,15 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
   const paid = order.paid;
   const remaining = Math.max(order.total - paid, 0);
   const pieceRows = order.pieces.length > 0 ? order.pieces : [];
+  const edgesDisplay =
+    (order.edgeRoundingPricePerM ?? 0) > 0 && order.edgeRoundingPrice > 0
+      ? formatEdgeRoundingSummary(
+          order.edgeRoundingPricePerM ?? 0,
+          order.edgeRoundingMeters ?? [],
+          order.edgeRoundingPrice,
+          lang,
+        )
+      : order.edges ?? '—';
   const addDeposit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
@@ -416,11 +449,27 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
     setTimeout(() => setNotice(''), 2800);
   };
   return <AppShell lang={lang} setLang={setLang}><div className="no-print mb-6 flex items-center gap-2 text-[11px] text-[#5F6B76]"><Link href="/orders" data-testid="link-back-orders" className="hover:text-[#3A3D3F]">{t.orders}</Link><span>/</span><span className="font-semibold text-[#3A3D3F]">{order.id}</span></div>
-     <OrderReceiptPrint lang={lang} order={order} deposits={deposits} paid={paid} headerLines={receiptLines} statusLabel={statusLabel(order.status, lang)} formatDate={(d) => orderDate(d, lang)} />
-     <div className="order-screen-content"><PageIntro eyebrow={t.orderDetails} title={order.id} description={`${order.customer} · ${orderDate(order.date, lang)}`} action={<><Button testId="button-receipt-header" onClick={() => setHeaderModal(true)} variant="outline" icon={<Settings2 size={15} />}>{t.receiptHeaderSettings}</Button><Button testId="button-print-receipt" onClick={() => { window.print(); setNotice(t.receiptReady); }} variant="outline" icon={<Printer size={15} />}>{t.printReceipt}</Button><Button testId="button-export-order" onClick={() => { setNotice(t.exportSuccess); setTimeout(() => setNotice(''), 2800); }} variant="stone" icon={<FileSpreadsheet size={15} />}>{t.exportExcel}</Button><Button testId="button-delete-order-detail" onClick={() => { if (window.confirm(t.confirmDeleteOrder)) deleteMutation.mutate(); }} variant="danger" icon={<Trash2 size={15} />}>{t.deleteOrder}</Button></>} />{notice && <div data-testid="status-order-feedback" className="no-print mb-4 flex items-center gap-2 rounded-lg border border-[#BCE3C9] bg-[#EAF6EF] px-4 py-3 text-xs font-semibold text-[#2E9B68]"><CheckCircle2 size={16} />{notice}</div>}
-     <div className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]"><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-bold">{t.orderData}</h2><label className="text-[10px] font-semibold text-[#8B949A]">{t.status}<select data-testid="select-order-detail-status" value={normalizeOrderStatus(order.status) as string} disabled={statusMutation.isPending} onChange={(e) => statusMutation.mutate(e.target.value as OrderStatus)} className="ms-2 rounded-md border border-[#E7E5E0] bg-white px-2 py-1.5 text-xs font-semibold text-[#3A3D3F]">{ORDER_STATUSES.map((s) => <option key={s} value={s}>{lang === 'ar' ? s : statusLabelFr(s)}</option>)}</select></label></div><div className="grid gap-y-5 sm:grid-cols-3">{[[t.customer, order.customer],[t.staffCreator, order.staff],[t.marbleKind, order.kind],[t.dimensions, order.dimensions ?? '—'],[t.thickness, order.thickness ?? '—'],[t.edges, order.edges ?? '—']].map(([label, value]) => <div key={String(label)}><p className="mb-1 text-[10px] text-[#8B949A]">{label}</p><p className="text-xs font-semibold">{value}</p></div>)}</div></section><section className="soft-shadow card-line overflow-hidden rounded-[11px] bg-white"><div className="flex items-center justify-between border-b border-[#E7E5E0] p-5"><h2 className="text-sm font-bold">{t.orderPiecesLabel}</h2><span className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `${pieceRows.length} قطع` : `${pieceRows.length} pièces`}</span></div><table className="w-full text-xs"><thead className="bg-[#FBFAF8] text-[10px] text-[#8B949A]"><tr><th className="px-5 py-3 text-start font-medium">{t.marbleKind}</th><th className="px-5 py-3 text-start font-medium">{t.dimensions}</th><th className="px-5 py-3 text-start font-medium">{t.quantityShort}</th><th className="px-5 py-3 text-end font-medium">{t.sellingPrice}</th></tr></thead><tbody>{pieceRows.map(row => <tr key={`${row.kind}-${row.dims}-${row.qty}`} className="border-t border-[#F0EEE9]"><td className="px-5 py-3.5 font-semibold">{row.kind}</td><td className="px-5 py-3.5 text-[#5F6B76]">{row.dims}</td><td className="px-5 py-3.5">{row.qty}</td><td className="mono px-5 py-3.5 text-end">{formatCurrency(pieceLineTotal(row), lang)}</td></tr>)}</tbody></table></section></div><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-6 flex items-center justify-between"><h2 className="text-sm font-bold">{t.paymentSummary}</h2><Banknote size={18} className="text-[#9B8C77]" /></div><div className="space-y-3 border-b border-[#E7E5E0] pb-5 text-xs">{(order.linesSubtotal > 0 || order.edgeRoundingPrice > 0) && <><div className="flex justify-between"><span className="text-[#5F6B76]">{t.slicesSubtotal}</span><b>{formatCurrency(order.linesSubtotal ?? order.total, lang)}</b></div>{order.edgeRoundingPrice > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">{t.edgeRounding}</span><b>{formatCurrency(order.edgeRoundingPrice, lang)}</b></div>}</>}<div className="flex justify-between"><span className="text-[#5F6B76]">{t.orderTotal}</span><b>{formatCurrency(order.total, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.paid}</span><b className="text-[#2E9B68]">{formatCurrency(paid, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.remaining}</span><b className="text-[#D95C55]">{formatCurrency(remaining, lang)}</b></div></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-[#F1EEE8]"><div className="h-full rounded-full bg-[#2E9B68] transition-all" style={{ width: `${Math.min(order.total ? (paid / order.total) * 100 : 0, 100)}%` }} /></div><p className="mt-2 text-[10px] text-[#8B949A]">{order.total ? Math.round((paid / order.total) * 100) : 0}% {t.paidPercent}</p><div className="no-print"><Button testId="button-add-deposit" onClick={() => setModal(true)} variant="dark" icon={<Plus size={15} />}>{t.addDeposit}</Button></div></section><section className="soft-shadow card-line rounded-[11px] bg-white p-5"><h2 className="mb-4 text-sm font-bold">{t.depositLog}</h2><div className="space-y-3">{deposits.map(d => <div key={d.id} className="flex items-center gap-3"><div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#EAF6EF] text-[#2E9B68]"><Check size={14} /></div><div className="flex-1"><p className="text-xs font-semibold">{lang === 'ar' ? d.method : ({ 'تحويل بنكي': t.bankTransfer, 'نقدي': t.cash, 'بطاقة': t.card }[d.method] || d.method)}</p><p className="text-[10px] text-[#8B949A]">{orderDate(d.date, lang)}</p></div><b className="mono text-xs text-[#2E9B68]">+{formatCurrency(d.amount, lang)}</b></div>)}</div></section></div></div>
+     <OrderReceiptPrint lang={receiptDocLang} order={order} deposits={deposits} paid={paid} headerLines={receiptLines} />
+     <div className="order-screen-content"><PageIntro eyebrow={t.orderDetails} title={order.id} description={`${order.customer} · ${orderDate(order.date, lang)}`} action={<><Button testId="button-receipt-header" onClick={() => setHeaderModal(true)} variant="outline" icon={<Settings2 size={15} />}>{t.receiptHeaderSettings}</Button><Button testId="button-print-receipt" onClick={() => setPrintModal(true)} variant="outline" icon={<Printer size={15} />}>{t.printReceipt}</Button><Button testId="button-export-order" onClick={() => { setNotice(t.exportSuccess); setTimeout(() => setNotice(''), 2800); }} variant="stone" icon={<FileSpreadsheet size={15} />}>{t.exportExcel}</Button><Button testId="button-delete-order-detail" onClick={() => { if (window.confirm(t.confirmDeleteOrder)) deleteMutation.mutate(); }} variant="danger" icon={<Trash2 size={15} />}>{t.deleteOrder}</Button></>} />{notice && <div data-testid="status-order-feedback" className="no-print mb-4 flex items-center gap-2 rounded-lg border border-[#BCE3C9] bg-[#EAF6EF] px-4 py-3 text-xs font-semibold text-[#2E9B68]"><CheckCircle2 size={16} />{notice}</div>}
+     <div className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]"><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-bold">{t.orderData}</h2><label className="text-[10px] font-semibold text-[#8B949A]">{t.status}<select data-testid="select-order-detail-status" value={normalizeOrderStatus(order.status) as string} disabled={statusMutation.isPending} onChange={(e) => statusMutation.mutate(e.target.value as OrderStatus)} className="ms-2 rounded-md border border-[#E7E5E0] bg-white px-2 py-1.5 text-xs font-semibold text-[#3A3D3F]">{ORDER_STATUSES.map((s) => <option key={s} value={s}>{lang === 'ar' ? s : statusLabelFr(s)}</option>)}</select></label></div><div className="grid gap-y-5 sm:grid-cols-3">{[[t.customer, order.customer],[t.staffCreator, order.staff],[t.marbleKind, order.kind],[t.dimensions, order.dimensions ?? '—'],[t.thickness, order.thickness ?? '—'],[t.edges, edgesDisplay]].map(([label, value]) => <div key={String(label)}><p className="mb-1 text-[10px] text-[#8B949A]">{label}</p><p className="text-xs font-semibold">{value}</p></div>)}</div></section><section className="soft-shadow card-line overflow-hidden rounded-[11px] bg-white"><div className="flex items-center justify-between border-b border-[#E7E5E0] p-5"><h2 className="text-sm font-bold">{t.orderPiecesLabel}</h2><span className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `${pieceRows.length} قطع` : `${pieceRows.length} pièces`}</span></div><table className="w-full text-xs"><thead className="bg-[#FBFAF8] text-[10px] text-[#8B949A]"><tr><th className="px-5 py-3 text-start font-medium">{t.marbleKind}</th><th className="px-5 py-3 text-start font-medium">{t.dimensions}</th><th className="px-5 py-3 text-start font-medium">{t.quantityShort}</th><th className="px-5 py-3 text-end font-medium">{t.sellingPrice}</th></tr></thead><tbody>{pieceRows.map(row => <tr key={`${row.kind}-${row.dims}-${row.qty}`} className="border-t border-[#F0EEE9]"><td className="px-5 py-3.5 font-semibold">{row.kind}</td><td className="px-5 py-3.5 text-[#5F6B76]">{row.dims}</td><td className="px-5 py-3.5">{row.qty}</td><td className="mono px-5 py-3.5 text-end">{formatCurrency(pieceLineTotal(row), lang)}</td></tr>)}</tbody></table></section></div><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-6 flex items-center justify-between"><h2 className="text-sm font-bold">{t.paymentSummary}</h2><Banknote size={18} className="text-[#9B8C77]" /></div><div className="space-y-3 border-b border-[#E7E5E0] pb-5 text-xs">{(order.linesSubtotal > 0 || order.edgeRoundingPrice > 0) && <><div className="flex justify-between"><span className="text-[#5F6B76]">{t.slicesSubtotal}</span><b>{formatCurrency(order.linesSubtotal ?? order.total, lang)}</b></div>{order.edgeRoundingPrice > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">{t.edgeRounding}</span><b>{formatCurrency(order.edgeRoundingPrice, lang)}</b></div>}</>}<div className="flex justify-between"><span className="text-[#5F6B76]">{t.orderTotal}</span><b>{formatCurrency(order.total, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.paid}</span><b className="text-[#2E9B68]">{formatCurrency(paid, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.remaining}</span><b className="text-[#D95C55]">{formatCurrency(remaining, lang)}</b></div></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-[#F1EEE8]"><div className="h-full rounded-full bg-[#2E9B68] transition-all" style={{ width: `${Math.min(order.total ? (paid / order.total) * 100 : 0, 100)}%` }} /></div><p className="mt-2 text-[10px] text-[#8B949A]">{order.total ? Math.round((paid / order.total) * 100) : 0}% {t.paidPercent}</p><div className="no-print"><Button testId="button-add-deposit" onClick={() => setModal(true)} variant="dark" icon={<Plus size={15} />}>{t.addDeposit}</Button></div></section><section className="soft-shadow card-line rounded-[11px] bg-white p-5"><h2 className="mb-4 text-sm font-bold">{t.depositLog}</h2><div className="space-y-3">{deposits.map(d => <div key={d.id} className="flex items-center gap-3"><div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#EAF6EF] text-[#2E9B68]"><Check size={14} /></div><div className="flex-1"><p className="text-xs font-semibold">{lang === 'ar' ? d.method : ({ 'تحويل بنكي': t.bankTransfer, 'نقدي': t.cash, 'بطاقة': t.card }[d.method] || d.method)}</p><p className="text-[10px] text-[#8B949A]">{orderDate(d.date, lang)}</p></div><b className="mono text-xs text-[#2E9B68]">+{formatCurrency(d.amount, lang)}</b></div>)}</div></section></div></div>
      {modal && <Modal title={t.newDeposit} onClose={() => setModal(false)}><form onSubmit={addDeposit} className="space-y-4"><Field label={t.depositAmount} name="amount" type="number" placeholder="0" required /><label className="block text-xs font-semibold">{t.paymentMethod}<select name="method" className="mt-1.5 h-10 w-full rounded-lg border border-[#E7E5E0] bg-white px-3 text-xs outline-none focus:border-[#CFC3AE]"><option value="تحويل بنكي">{t.bankTransfer}</option><option value="نقدي">{t.cash}</option><option value="بطاقة">{t.card}</option></select></label><div className="flex justify-end gap-2 pt-2"><Button testId="button-cancel-deposit" onClick={() => setModal(false)} variant="outline">{t.cancel}</Button><Button testId="button-submit-deposit" variant="dark">{t.saveDeposit}</Button></div></form></Modal>}</div>
-     {headerModal && <ReceiptHeaderSettingsModal lang={lang} lines={receiptLines} onChange={setReceiptLines} onClose={() => setHeaderModal(false)} />}</AppShell>;
+     {headerModal && <ReceiptHeaderSettingsModal lang={lang} lines={receiptLines} onChange={setReceiptLines} onClose={() => setHeaderModal(false)} />}
+     {printModal && (
+       <ReceiptPrintModal
+         uiLang={lang}
+         onClose={() => setPrintModal(false)}
+         onPrint={(docLang) => {
+           setReceiptDocLang(docLang);
+           setPrintModal(false);
+           requestAnimationFrame(() => {
+             requestAnimationFrame(() => {
+               window.print();
+               setNotice(t.receiptReady);
+             });
+           });
+         }}
+       />
+     )}</AppShell>;
 }
 
 function Finance({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
