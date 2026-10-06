@@ -5,10 +5,8 @@ import { CustomersManagerModal } from '@/components/customers-manager-modal';
 import { OrderCreateForm } from '@/components/order-create-form';
 import { ActiveStaffProvider, useActiveStaff } from '@/lib/active-staff';
 import { OrderReceiptPrint } from '@/components/order-receipt-print';
-import {
-  ReceiptPrintModal,
-  type ReceiptDocLang,
-} from '@/components/receipt-print-modal';
+import { ReceiptPrintModal } from '@/components/receipt-print-modal';
+import { OrderStatusPicker } from '@/components/order-status-picker';
 import { ReceiptHeaderSettingsModal } from '@/components/receipt-header';
 import {
   loadReceiptHeaderLines,
@@ -20,6 +18,7 @@ import { PageLoading } from '@/components/page-loading';
 import {
   api,
   ORDER_STATUSES,
+  depositSignedAmount,
   type OrderStatus,
   normalizeOrderStatus,
 } from '@/lib/api';
@@ -87,6 +86,12 @@ const copy = {
     receiptReady: 'تم تجهيز الإيصال للطباعة', exportSuccess: 'تم تصدير ملف Excel بنجاح',     depositSuccess: 'تم تسجيل الدفعة وتحديث الرصيد',
     edgeRounding: 'تشطيب الحواف', slicesSubtotal: 'مجموع القطع',
     receiptHeaderSettings: 'رأس الإيصال',
+    refundCustomer: 'استرداد للعميل',
+    newRefund: 'تسجيل استرداد',
+    refundAmount: 'مبلغ الاسترداد',
+    saveRefund: 'تسجيل الاسترداد',
+    refundSuccess: 'تم تسجيل الاسترداد',
+    refundLabel: 'استرداد',
   },
   fr: {
     dashboard: 'Tableau de bord', inventory: 'Stock', orders: 'Commandes', finance: 'Finance', settings: 'Paramètres',
@@ -131,6 +136,12 @@ const copy = {
     receiptReady: 'Le reçu est prêt à être imprimé', exportSuccess: 'Le fichier Excel a été exporté', depositSuccess: 'Paiement enregistré, solde mis à jour',
     edgeRounding: 'Finition des chants', slicesSubtotal: 'Sous-total pièces',
     receiptHeaderSettings: 'En-tête du reçu',
+    refundCustomer: 'Rembourser le client',
+    newRefund: 'Enregistrer un remboursement',
+    refundAmount: 'Montant du remboursement',
+    saveRefund: 'Enregistrer le remboursement',
+    refundSuccess: 'Remboursement enregistré',
+    refundLabel: 'Remboursement',
   },
 };
 
@@ -388,12 +399,20 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
     enabled: Boolean(orderId),
   });
   const depositMutation = useMutation({
-    mutationFn: (body: { amount: number; method: string }) => api.addDeposit(orderId, body),
+    mutationFn: (body: {
+      amount: number;
+      method: string;
+      depositKind?: 'payment' | 'refund';
+    }) => api.addDeposit(orderId, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['order', orderId] });
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['dashboard-metrics'] });
     },
+  });
+  const { data: marbleKinds = [] } = useQuery({
+    queryKey: ['marble-kinds', 'receipt'],
+    queryFn: () => api.getMarbleKinds(),
   });
   const statusMutation = useMutation({
     mutationFn: (status: OrderStatus) => api.updateOrder(orderId, { status }),
@@ -412,13 +431,13 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
     },
   });
   const [modal, setModal] = useState(false);
+  const [refundModal, setRefundModal] = useState(false);
   const [notice, setNotice] = useState('');
   const [receiptLines, setReceiptLines] = useState<ReceiptHeaderLines>(() =>
     loadReceiptHeaderLines(),
   );
   const [headerModal, setHeaderModal] = useState(false);
   const [printModal, setPrintModal] = useState(false);
-  const [receiptDocLang, setReceiptDocLang] = useState<ReceiptDocLang>('ar');
   useEffect(() => {
     if (data?.order.orderNumber && data.order.orderNumber !== orderId) {
       setLocation(`/orders/${data.order.orderNumber}`);
@@ -440,6 +459,13 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
           lang,
         )
       : order.edges ?? '—';
+  const marbleImagesByKind: Record<string, string> = {};
+  for (const k of marbleKinds) {
+    if (k.imageUrl) marbleImagesByKind[k.name] = k.imageUrl;
+  }
+
+  const isCancelled = normalizeOrderStatus(order.status) === 'ملغاة';
+
   const addDeposit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
@@ -448,18 +474,41 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
     setNotice(t.depositSuccess);
     setTimeout(() => setNotice(''), 2800);
   };
+
+  const addRefund = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    await depositMutation.mutateAsync({
+      amount: Number(fd.get('amount')),
+      method: 'استرداد',
+      depositKind: 'refund',
+    });
+    setRefundModal(false);
+    setNotice(t.refundSuccess);
+    setTimeout(() => setNotice(''), 2800);
+  };
+
+  const depositMethodLabel = (d: { method: string; depositKind?: string }) => {
+    if (d.depositKind === 'refund') return t.refundLabel;
+    if (lang === 'ar') return d.method;
+    return (
+      { 'تحويل بنكي': t.bankTransfer, 'نقدي': t.cash, 'بطاقة': t.card, استرداد: t.refundLabel }[
+        d.method
+      ] || d.method
+    );
+  };
   return <AppShell lang={lang} setLang={setLang}><div className="no-print mb-6 flex items-center gap-2 text-[11px] text-[#5F6B76]"><Link href="/orders" data-testid="link-back-orders" className="hover:text-[#3A3D3F]">{t.orders}</Link><span>/</span><span className="font-semibold text-[#3A3D3F]">{order.id}</span></div>
-     <OrderReceiptPrint lang={receiptDocLang} order={order} deposits={deposits} paid={paid} headerLines={receiptLines} />
+     <OrderReceiptPrint order={order} deposits={deposits} paid={paid} marbleImagesByKind={marbleImagesByKind} />
      <div className="order-screen-content"><PageIntro eyebrow={t.orderDetails} title={order.id} description={`${order.customer} · ${orderDate(order.date, lang)}`} action={<><Button testId="button-receipt-header" onClick={() => setHeaderModal(true)} variant="outline" icon={<Settings2 size={15} />}>{t.receiptHeaderSettings}</Button><Button testId="button-print-receipt" onClick={() => setPrintModal(true)} variant="outline" icon={<Printer size={15} />}>{t.printReceipt}</Button><Button testId="button-export-order" onClick={() => { setNotice(t.exportSuccess); setTimeout(() => setNotice(''), 2800); }} variant="stone" icon={<FileSpreadsheet size={15} />}>{t.exportExcel}</Button><Button testId="button-delete-order-detail" onClick={() => { if (window.confirm(t.confirmDeleteOrder)) deleteMutation.mutate(); }} variant="danger" icon={<Trash2 size={15} />}>{t.deleteOrder}</Button></>} />{notice && <div data-testid="status-order-feedback" className="no-print mb-4 flex items-center gap-2 rounded-lg border border-[#BCE3C9] bg-[#EAF6EF] px-4 py-3 text-xs font-semibold text-[#2E9B68]"><CheckCircle2 size={16} />{notice}</div>}
-     <div className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]"><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-bold">{t.orderData}</h2><label className="text-[10px] font-semibold text-[#8B949A]">{t.status}<select data-testid="select-order-detail-status" value={normalizeOrderStatus(order.status) as string} disabled={statusMutation.isPending} onChange={(e) => statusMutation.mutate(e.target.value as OrderStatus)} className="ms-2 rounded-md border border-[#E7E5E0] bg-white px-2 py-1.5 text-xs font-semibold text-[#3A3D3F]">{ORDER_STATUSES.map((s) => <option key={s} value={s}>{lang === 'ar' ? s : statusLabelFr(s)}</option>)}</select></label></div><div className="grid gap-y-5 sm:grid-cols-3">{[[t.customer, order.customer],[t.staffCreator, order.staff],[t.marbleKind, order.kind],[t.dimensions, order.dimensions ?? '—'],[t.thickness, order.thickness ?? '—'],[t.edges, edgesDisplay]].map(([label, value]) => <div key={String(label)}><p className="mb-1 text-[10px] text-[#8B949A]">{label}</p><p className="text-xs font-semibold">{value}</p></div>)}</div></section><section className="soft-shadow card-line overflow-hidden rounded-[11px] bg-white"><div className="flex items-center justify-between border-b border-[#E7E5E0] p-5"><h2 className="text-sm font-bold">{t.orderPiecesLabel}</h2><span className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `${pieceRows.length} قطع` : `${pieceRows.length} pièces`}</span></div><table className="w-full text-xs"><thead className="bg-[#FBFAF8] text-[10px] text-[#8B949A]"><tr><th className="px-5 py-3 text-start font-medium">{t.marbleKind}</th><th className="px-5 py-3 text-start font-medium">{t.dimensions}</th><th className="px-5 py-3 text-start font-medium">{t.quantityShort}</th><th className="px-5 py-3 text-end font-medium">{t.sellingPrice}</th></tr></thead><tbody>{pieceRows.map(row => <tr key={`${row.kind}-${row.dims}-${row.qty}`} className="border-t border-[#F0EEE9]"><td className="px-5 py-3.5 font-semibold">{row.kind}</td><td className="px-5 py-3.5 text-[#5F6B76]">{row.dims}</td><td className="px-5 py-3.5">{row.qty}</td><td className="mono px-5 py-3.5 text-end">{formatCurrency(pieceLineTotal(row), lang)}</td></tr>)}</tbody></table></section></div><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-6 flex items-center justify-between"><h2 className="text-sm font-bold">{t.paymentSummary}</h2><Banknote size={18} className="text-[#9B8C77]" /></div><div className="space-y-3 border-b border-[#E7E5E0] pb-5 text-xs">{(order.linesSubtotal > 0 || order.edgeRoundingPrice > 0) && <><div className="flex justify-between"><span className="text-[#5F6B76]">{t.slicesSubtotal}</span><b>{formatCurrency(order.linesSubtotal ?? order.total, lang)}</b></div>{order.edgeRoundingPrice > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">{t.edgeRounding}</span><b>{formatCurrency(order.edgeRoundingPrice, lang)}</b></div>}</>}<div className="flex justify-between"><span className="text-[#5F6B76]">{t.orderTotal}</span><b>{formatCurrency(order.total, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.paid}</span><b className="text-[#2E9B68]">{formatCurrency(paid, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.remaining}</span><b className="text-[#D95C55]">{formatCurrency(remaining, lang)}</b></div></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-[#F1EEE8]"><div className="h-full rounded-full bg-[#2E9B68] transition-all" style={{ width: `${Math.min(order.total ? (paid / order.total) * 100 : 0, 100)}%` }} /></div><p className="mt-2 text-[10px] text-[#8B949A]">{order.total ? Math.round((paid / order.total) * 100) : 0}% {t.paidPercent}</p><div className="no-print"><Button testId="button-add-deposit" onClick={() => setModal(true)} variant="dark" icon={<Plus size={15} />}>{t.addDeposit}</Button></div></section><section className="soft-shadow card-line rounded-[11px] bg-white p-5"><h2 className="mb-4 text-sm font-bold">{t.depositLog}</h2><div className="space-y-3">{deposits.map(d => <div key={d.id} className="flex items-center gap-3"><div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#EAF6EF] text-[#2E9B68]"><Check size={14} /></div><div className="flex-1"><p className="text-xs font-semibold">{lang === 'ar' ? d.method : ({ 'تحويل بنكي': t.bankTransfer, 'نقدي': t.cash, 'بطاقة': t.card }[d.method] || d.method)}</p><p className="text-[10px] text-[#8B949A]">{orderDate(d.date, lang)}</p></div><b className="mono text-xs text-[#2E9B68]">+{formatCurrency(d.amount, lang)}</b></div>)}</div></section></div></div>
-     {modal && <Modal title={t.newDeposit} onClose={() => setModal(false)}><form onSubmit={addDeposit} className="space-y-4"><Field label={t.depositAmount} name="amount" type="number" placeholder="0" required /><label className="block text-xs font-semibold">{t.paymentMethod}<select name="method" className="mt-1.5 h-10 w-full rounded-lg border border-[#E7E5E0] bg-white px-3 text-xs outline-none focus:border-[#CFC3AE]"><option value="تحويل بنكي">{t.bankTransfer}</option><option value="نقدي">{t.cash}</option><option value="بطاقة">{t.card}</option></select></label><div className="flex justify-end gap-2 pt-2"><Button testId="button-cancel-deposit" onClick={() => setModal(false)} variant="outline">{t.cancel}</Button><Button testId="button-submit-deposit" variant="dark">{t.saveDeposit}</Button></div></form></Modal>}</div>
+     <div className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]"><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-bold">{t.orderData}</h2><div className="flex items-center gap-2 text-[10px] font-semibold text-[#8B949A]"><span>{t.status}</span><OrderStatusPicker testId="select-order-detail-status" value={order.status} lang={lang} disabled={statusMutation.isPending} onChange={(s) => statusMutation.mutate(s)} /></div></div><div className="grid gap-y-5 sm:grid-cols-3">{[[t.customer, order.customer],[t.staffCreator, order.staff],[t.marbleKind, order.kind],[t.dimensions, order.dimensions ?? '—'],[t.thickness, order.thickness ?? '—'],[t.edges, edgesDisplay]].map(([label, value]) => <div key={String(label)}><p className="mb-1 text-[10px] text-[#8B949A]">{label}</p><p className="text-xs font-semibold">{value}</p></div>)}</div></section><section className="soft-shadow card-line overflow-hidden rounded-[11px] bg-white"><div className="flex items-center justify-between border-b border-[#E7E5E0] p-5"><h2 className="text-sm font-bold">{t.orderPiecesLabel}</h2><span className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `${pieceRows.length} قطع` : `${pieceRows.length} pièces`}</span></div><table className="w-full text-xs"><thead className="bg-[#FBFAF8] text-[10px] text-[#8B949A]"><tr><th className="px-5 py-3 text-start font-medium">{t.marbleKind}</th><th className="px-5 py-3 text-start font-medium">{t.dimensions}</th><th className="px-5 py-3 text-start font-medium">{t.quantityShort}</th><th className="px-5 py-3 text-end font-medium">{t.sellingPrice}</th></tr></thead><tbody>{pieceRows.map(row => <tr key={`${row.kind}-${row.dims}-${row.qty}`} className="border-t border-[#F0EEE9]"><td className="px-5 py-3.5 font-semibold">{row.kind}</td><td className="px-5 py-3.5 text-[#5F6B76]">{row.dims}</td><td className="px-5 py-3.5">{row.qty}</td><td className="mono px-5 py-3.5 text-end">{formatCurrency(pieceLineTotal(row), lang)}</td></tr>)}</tbody></table></section></div><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-6 flex items-center justify-between"><h2 className="text-sm font-bold">{t.paymentSummary}</h2><Banknote size={18} className="text-[#9B8C77]" /></div><div className="space-y-3 border-b border-[#E7E5E0] pb-5 text-xs">{(order.linesSubtotal > 0 || order.edgeRoundingPrice > 0) && <><div className="flex justify-between"><span className="text-[#5F6B76]">{t.slicesSubtotal}</span><b>{formatCurrency(order.linesSubtotal ?? order.total, lang)}</b></div>{order.edgeRoundingPrice > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">{t.edgeRounding}</span><b>{formatCurrency(order.edgeRoundingPrice, lang)}</b></div>}</>}<div className="flex justify-between"><span className="text-[#5F6B76]">{t.orderTotal}</span><b>{formatCurrency(order.total, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.paid}</span><b className="text-[#2E9B68]">{formatCurrency(paid, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.remaining}</span><b className="text-[#D95C55]">{formatCurrency(remaining, lang)}</b></div></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-[#F1EEE8]"><div className="h-full rounded-full bg-[#2E9B68] transition-all" style={{ width: `${Math.min(order.total ? (paid / order.total) * 100 : 0, 100)}%` }} /></div><p className="mt-2 text-[10px] text-[#8B949A]">{order.total ? Math.round((paid / order.total) * 100) : 0}% {t.paidPercent}</p><div className="no-print flex flex-wrap gap-2"><Button testId="button-add-deposit" onClick={() => setModal(true)} variant="dark" icon={<Plus size={15} />}>{t.addDeposit}</Button>{isCancelled && paid > 0 && <Button testId="button-refund-order" onClick={() => setRefundModal(true)} variant="outline" icon={<CreditCard size={15} />}>{t.refundCustomer}</Button>}</div></section><section className="soft-shadow card-line rounded-[11px] bg-white p-5"><h2 className="mb-4 text-sm font-bold">{t.depositLog}</h2><div className="space-y-3">{deposits.map(d => { const signed = depositSignedAmount(d); const isRefund = d.depositKind === 'refund'; return <div key={d.id} className="flex items-center gap-3"><div className={`flex h-8 w-8 items-center justify-center rounded-full ${isRefund ? 'bg-[#FBEDEC] text-[#D95C55]' : 'bg-[#EAF6EF] text-[#2E9B68]'}`}><Check size={14} /></div><div className="flex-1"><p className="text-xs font-semibold">{depositMethodLabel(d)}</p><p className="text-[10px] text-[#8B949A]">{orderDate(d.date, lang)}</p></div><b className={`mono text-xs ${isRefund ? 'text-[#D95C55]' : 'text-[#2E9B68]'}`}>{signed >= 0 ? '+' : ''}{formatCurrency(signed, lang)}</b></div>; })}</div></section></div></div>
+     {modal && <Modal title={t.newDeposit} onClose={() => setModal(false)}><form onSubmit={addDeposit} className="space-y-4"><Field label={t.depositAmount} name="amount" type="number" placeholder="0" required /><label className="block text-xs font-semibold">{t.paymentMethod}<select name="method" className="mt-1.5 h-10 w-full rounded-lg border border-[#E7E5E0] bg-white px-3 text-xs outline-none focus:border-[#CFC3AE]"><option value="تحويل بنكي">{t.bankTransfer}</option><option value="نقدي">{t.cash}</option><option value="بطاقة">{t.card}</option></select></label><div className="flex justify-end gap-2 pt-2"><Button testId="button-cancel-deposit" onClick={() => setModal(false)} variant="outline">{t.cancel}</Button><Button testId="button-submit-deposit" variant="dark">{t.saveDeposit}</Button></div></form></Modal>}
+     {refundModal && <Modal title={t.newRefund} onClose={() => setRefundModal(false)}><form onSubmit={addRefund} className="space-y-4"><Field label={t.refundAmount} name="amount" type="number" placeholder="0" required /><p className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `الحد الأقصى: ${formatCurrency(paid, lang)}` : `Maximum : ${formatCurrency(paid, lang)}`}</p><div className="flex justify-end gap-2 pt-2"><Button testId="button-cancel-refund" onClick={() => setRefundModal(false)} variant="outline">{t.cancel}</Button><Button testId="button-submit-refund" variant="dark">{t.saveRefund}</Button></div></form></Modal>}</div>
      {headerModal && <ReceiptHeaderSettingsModal lang={lang} lines={receiptLines} onChange={setReceiptLines} onClose={() => setHeaderModal(false)} />}
      {printModal && (
        <ReceiptPrintModal
          uiLang={lang}
          onClose={() => setPrintModal(false)}
-         onPrint={(docLang) => {
-           setReceiptDocLang(docLang);
+         onPrint={() => {
            setPrintModal(false);
            requestAnimationFrame(() => {
              requestAnimationFrame(() => {

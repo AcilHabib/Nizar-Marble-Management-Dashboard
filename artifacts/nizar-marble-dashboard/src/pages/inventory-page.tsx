@@ -69,6 +69,7 @@ const labels = {
     save: 'حفظ',
     delete: 'حذف',
     edit: 'تعديل',
+    cancelEdit: 'إلغاء',
     filter: 'تصفية',
     all: 'الكل',
     newest: 'الأحدث',
@@ -126,6 +127,7 @@ const labels = {
     save: 'Enregistrer',
     delete: 'Supprimer',
     edit: 'Modifier',
+    cancelEdit: 'Annuler',
     filter: 'Filtrer',
     all: 'Tous',
     newest: 'Plus récent',
@@ -871,8 +873,7 @@ export function InventoryKindDetail({ lang }: { lang: Lang }) {
               <th className="px-4 py-3 text-end">{t.purchaseTotal}</th>
               <th className="px-4 py-3 text-end">{t.sellingPerSqm}</th>
               <th className="px-4 py-3 text-end">{t.sellingTotal}</th>
-              <th className="px-4 py-3 text-end">{t.waste}</th>
-              <th className="px-4 py-3 text-end">{t.delete}</th>
+              <th className="px-4 py-3 text-end">{lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
             </tr>
           </thead>
           <tbody>
@@ -894,6 +895,9 @@ export function InventoryKindDetail({ lang }: { lang: Lang }) {
                   sellingPerSqm: t.sellingPerSqm,
                   sellingTotal: t.sellingTotal,
                   waste: t.waste,
+                  edit: t.edit,
+                  save: t.save,
+                  cancel: t.cancelEdit,
                   delete: t.delete,
                 }}
                 onEditWaste={(s) => {

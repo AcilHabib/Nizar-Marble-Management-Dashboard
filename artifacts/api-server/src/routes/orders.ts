@@ -276,18 +276,47 @@ router.post("/:orderNumber/deposits", async (req, res, next) => {
       return;
     }
 
-    const { amount, method } = req.body as { amount?: number; method?: string };
+    const { amount, method, depositKind = "payment" } = req.body as {
+      amount?: number;
+      method?: string;
+      depositKind?: string;
+    };
     if (!amount || !method) {
       res.status(400).json({ error: "amount and method are required" });
       return;
+    }
+
+    const kind = depositKind === "refund" ? "refund" : "payment";
+    const value = Math.abs(Math.round(Number(amount)));
+    if (value <= 0) {
+      res.status(400).json({ error: "Invalid amount" });
+      return;
+    }
+
+    if (kind === "refund") {
+      if (normalizeOrderStatus(order.status) !== "ملغاة") {
+        res.status(400).json({
+          error: "Refunds are only allowed for cancelled orders",
+        });
+        return;
+      }
+      const existing = await prisma.deposit.findMany({
+        where: { orderId: order.id },
+      });
+      const paid = paidTotal(existing);
+      if (value > paid) {
+        res.status(400).json({ error: "Refund exceeds amount paid" });
+        return;
+      }
     }
 
     const actor = actorFromRequest(req);
     const deposit = await prisma.deposit.create({
       data: {
         orderId: order.id,
-        amount: Number(amount),
+        amount: value,
         method: String(method),
+        depositKind: kind,
         recordedBy: actor.staffName,
       },
     });

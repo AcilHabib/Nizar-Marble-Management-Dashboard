@@ -9,8 +9,17 @@ function formatDisplayDate(date: Date): string {
   });
 }
 
-export function paidTotal(deposits: Pick<Deposit, "amount">[]): number {
-  return deposits.reduce((sum, d) => sum + d.amount, 0);
+export function depositSignedAmount(
+  deposit: Pick<Deposit, "amount" | "depositKind">,
+): number {
+  const n = Math.abs(Number(deposit.amount) || 0);
+  return deposit.depositKind === "refund" ? -n : n;
+}
+
+export function paidTotal(
+  deposits: Pick<Deposit, "amount" | "depositKind">[],
+): number {
+  return deposits.reduce((sum, d) => sum + depositSignedAmount(d), 0);
 }
 
 export type OrderDto = {
@@ -66,6 +75,7 @@ export type DepositDto = {
   id: string;
   amount: number;
   method: string;
+  depositKind: string;
   recordedBy: string;
   date: string;
   depositDate: string;
@@ -76,6 +86,7 @@ export function serializeDeposit(deposit: Deposit): DepositDto {
     id: deposit.id,
     amount: deposit.amount,
     method: deposit.method,
+    depositKind: deposit.depositKind ?? "payment",
     recordedBy: deposit.recordedBy ?? "",
     date: formatDisplayDate(deposit.depositDate),
     depositDate: deposit.depositDate.toISOString(),

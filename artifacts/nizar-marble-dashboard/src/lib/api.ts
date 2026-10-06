@@ -82,10 +82,20 @@ export type Deposit = {
   id: string;
   amount: number;
   method: string;
+  depositKind?: 'payment' | 'refund' | string;
   recordedBy?: string;
   date: string;
   depositDate?: string;
 };
+
+export function depositSignedAmount(deposit: Deposit): number {
+  const n = Math.abs(deposit.amount);
+  return deposit.depositKind === 'refund' ? -n : n;
+}
+
+export function netPaidFromDeposits(deposits: Deposit[]): number {
+  return deposits.reduce((sum, d) => sum + depositSignedAmount(d), 0);
+}
 
 export type Supplier = {
   id: string;
@@ -218,7 +228,7 @@ export const api = {
     }),
   addDeposit: (
     orderNumber: string,
-    body: { amount: number; method: string },
+    body: { amount: number; method: string; depositKind?: 'payment' | 'refund' },
   ) =>
     request<Deposit>(`/orders/${orderNumber}/deposits`, {
       method: 'POST',

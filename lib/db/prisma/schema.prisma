@@ -60,6 +60,7 @@ model Deposit {
   order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   amount      Int
   method      String
+  depositKind String   @default("payment")
   recordedBy  String   @default("")
   depositDate DateTime @default(now())
 }

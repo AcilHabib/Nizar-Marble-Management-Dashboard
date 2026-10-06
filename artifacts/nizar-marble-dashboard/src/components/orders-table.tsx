@@ -4,13 +4,11 @@ import { Loader2, Trash2 } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 import {
   api,
-  ORDER_STATUSES,
   type Order,
   type OrderStatus,
-  normalizeOrderStatus,
 } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
-import { statusLabelFr } from '@/lib/order-status';
+import { OrderStatusPicker } from '@/components/order-status-picker';
 
 type Lang = 'ar' | 'fr';
 
@@ -116,23 +114,13 @@ export function OrderTableRow({
         {formatCurrency(remaining, lang)}
       </td>
       <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
-        <select
-          data-testid={`select-order-status-${order.orderNumber}`}
-          value={normalizeOrderStatus(order.status) as string}
+        <OrderStatusPicker
+          testId={`select-order-status-${order.orderNumber}`}
+          value={order.status}
+          lang={lang}
           disabled={updateMutation.isPending}
-          onChange={(e) =>
-            updateMutation.mutate({
-              status: e.target.value as OrderStatus,
-            })
-          }
-          className="max-w-[130px] rounded-md border border-[#E7E5E0] bg-white px-2 py-1.5 text-[10px] font-semibold"
-        >
-          {ORDER_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {lang === 'ar' ? s : statusLabelFr(s)}
-            </option>
-          ))}
-        </select>
+          onChange={(status) => updateMutation.mutate({ status })}
+        />
       </td>
       <td className="px-5 py-3 text-end">
         <div className="flex items-center justify-end gap-1">
