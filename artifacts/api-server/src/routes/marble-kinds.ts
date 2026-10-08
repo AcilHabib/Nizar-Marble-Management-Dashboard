@@ -5,6 +5,7 @@ import {
   serializeKind,
   serializeSlice,
 } from "../lib/inventory-serializers";
+import { sliceAvailableCount } from "../lib/slice-availability";
 import { dimensionsKey, wasteAreaSqm } from "../lib/slice-math";
 import { recordStaffAction } from "../lib/staff-action";
 import { actorFromRequest } from "../middleware/staff-actor";
@@ -275,6 +276,18 @@ router.patch("/slices/:sliceId", async (req, res, next) => {
     if (!current) {
       res.status(404).json({ error: "Slice not found" });
       return;
+    }
+
+    if (body.sliceCount !== undefined) {
+      const nextCount = Math.max(1, Math.round(Number(body.sliceCount) || 1));
+      const used = current.sliceCount - sliceAvailableCount(current);
+      if (nextCount < used) {
+        res.status(400).json({
+          error: "Slice count cannot be lower than slices already used by orders",
+        });
+        return;
+      }
+      data.sliceCount = nextCount;
     }
 
     const len = Number(data.lengthM ?? current.lengthM);

@@ -70,8 +70,8 @@ export function OrderReceiptPrint({
     <article className="order-receipt-print receipt-fr" dir="ltr">
       <header className="receipt-header receipt-header--fr">
         <div className="receipt-brand-block">
-          <h1 className="receipt-brand-title">SARL NAZAR</h1>
-          <p className="receipt-brand-sub">Nazar Marbre</p>
+          <h1 className="receipt-brand-title">S.A.R.L NEZZAR</h1>
+          <p className="receipt-brand-sub">Marbre, granit, quartz</p>
         </div>
         <img src={logoUrl} alt="" className="receipt-header-logo" />
       </header>

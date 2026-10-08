@@ -72,11 +72,22 @@ export type Customer = {
 };
 
 export type OrderCutLine = {
-  sliceId: string;
+  sliceId?: string;
+  kindId?: string;
   cutLengthM: number;
   cutWidthM: number;
+  thicknessM?: number;
   qty: number;
+  sellingPerSqm?: number;
 };
+
+export function orderUsesInventorySlice(order: {
+  pieces: { sliceId?: string }[];
+}) {
+  return order.pieces.some((piece) => Boolean(piece.sliceId));
+}
+
+export type SliceDisposition = 'return' | 'waste';
 
 export type Deposit = {
   id: string;
@@ -140,6 +151,7 @@ export type MarbleSlice = {
   purchaseTotal: number;
   sellingTotal: number;
   availableNetAreaSqm: number;
+  availableSliceCount: number;
   createdAt: string;
 };
 
@@ -236,7 +248,11 @@ export const api = {
     }),
   updateOrder: (
     orderNumber: string,
-    body: { status?: OrderStatus; orderNumber?: string },
+    body: {
+      status?: OrderStatus;
+      orderNumber?: string;
+      sliceDisposition?: SliceDisposition;
+    },
   ) =>
     request<Order>(`/orders/${orderNumber}`, {
       method: 'PATCH',

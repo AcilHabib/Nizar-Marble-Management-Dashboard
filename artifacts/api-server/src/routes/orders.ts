@@ -1,9 +1,14 @@
 import { Router, type IRouter } from "express";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@workspace/db";
+import { cutFitsOnSlice, sliceAvailableCount } from "../lib/slice-availability";
 import {
-  cutAreaSqm,
-  sliceAvailableNetAreaSqm,
-} from "../lib/slice-availability";
+  consumeReservations,
+  releaseReservations,
+  reservationOf,
+  SliceStockError,
+  wholeSliceReservation,
+} from "../lib/slice-reservation";
 import {
   serializeDeposit,
   serializeOrder,
@@ -57,10 +62,13 @@ router.get("/:orderNumber", async (req, res, next) => {
 });
 
 type OrderLineInput = {
-  sliceId: string;
+  sliceId?: string;
+  kindId?: string;
   cutLengthM: number;
   cutWidthM: number;
+  thicknessM?: number;
   qty: number;
+  sellingPerSqm?: number | null;
 };
 
 router.post("/", async (req, res, next) => {
@@ -97,10 +105,16 @@ router.post("/", async (req, res, next) => {
 
     const normalizedLines = Array.isArray(lines)
       ? lines.map((l) => ({
-          sliceId: String(l.sliceId ?? ""),
+          sliceId: String(l.sliceId ?? "").trim(),
+          kindId: String(l.kindId ?? "").trim(),
           cutLengthM: Number(l.cutLengthM),
           cutWidthM: Number(l.cutWidthM),
-          qty: Math.max(1, Number(l.qty) || 1),
+          thicknessM: Number(l.thicknessM),
+          qty: Math.max(1, Math.round(Number(l.qty) || 1)),
+          sellingPerSqm:
+            l.sellingPerSqm === undefined || l.sellingPerSqm === null
+              ? undefined
+              : Number(l.sellingPerSqm),
         }))
       : [];
 
@@ -111,13 +125,36 @@ router.post("/", async (req, res, next) => {
 
     for (const line of normalizedLines) {
       if (
-        !line.sliceId ||
         !Number.isFinite(line.cutLengthM) ||
         !Number.isFinite(line.cutWidthM) ||
         line.cutLengthM <= 0 ||
         line.cutWidthM <= 0
       ) {
-        res.status(400).json({ error: "Invalid cut dimensions or slice" });
+        res.status(400).json({ error: "Invalid cut dimensions" });
+        return;
+      }
+      if (!line.sliceId && !line.kindId) {
+        res.status(400).json({ error: "Marble kind is required" });
+        return;
+      }
+      if (
+        !line.sliceId &&
+        (!Number.isFinite(line.thicknessM) || line.thicknessM <= 0)
+      ) {
+        res.status(400).json({ error: "Thickness is required" });
+        return;
+      }
+      if (
+        line.sellingPerSqm !== undefined &&
+        (!Number.isFinite(line.sellingPerSqm) || line.sellingPerSqm < 0)
+      ) {
+        res.status(400).json({ error: "Invalid unit price" });
+        return;
+      }
+      if (!line.sliceId && line.sellingPerSqm === undefined) {
+        res.status(400).json({
+          error: "Unit price is required when the order does not use a slice",
+        });
         return;
       }
     }
@@ -134,21 +171,21 @@ router.post("/", async (req, res, next) => {
     }
 
     const order = await prisma.$transaction(async (tx) => {
-      const usageBySlice = new Map<string, number>();
+      const slicesNeeded = new Map<string, number>();
       for (const line of normalizedLines) {
-        const area = cutAreaSqm(line.cutLengthM, line.cutWidthM, line.qty);
-        usageBySlice.set(
+        if (!line.sliceId) continue;
+        slicesNeeded.set(
           line.sliceId,
-          (usageBySlice.get(line.sliceId) ?? 0) + area,
+          (slicesNeeded.get(line.sliceId) ?? 0) + line.qty,
         );
       }
 
       const sliceCache = new Map<
         string,
-        Awaited<ReturnType<typeof tx.marbleSlice.findUnique>>
+        Prisma.MarbleSliceGetPayload<{ include: { kind: true } }>
       >();
 
-      for (const [sliceId, neededArea] of usageBySlice) {
+      for (const [sliceId, needed] of slicesNeeded) {
         const slice = await tx.marbleSlice.findUnique({
           where: { id: sliceId },
           include: { kind: true },
@@ -157,14 +194,38 @@ router.post("/", async (req, res, next) => {
           throw new Error(`Slice not found: ${sliceId}`);
         }
         sliceCache.set(sliceId, slice);
-        const available = sliceAvailableNetAreaSqm(slice);
-        if (neededArea > available + 1e-6) {
-          const err = new Error(
-            `Insufficient area on slice ${slice.kind.name} (${formatDims(slice.lengthM, slice.widthM, slice.thicknessM)}). Available ${available.toFixed(2)} m², requested ${neededArea.toFixed(2)} m²`,
+        const available = sliceAvailableCount(slice);
+        if (needed > available) {
+          throw new SliceStockError(
+            `Not enough whole slices for ${slice.kind.name}. Available ${available}, requested ${needed}.`,
           );
-          (err as Error & { statusCode?: number }).statusCode = 409;
+        }
+      }
+
+      for (const line of normalizedLines) {
+        if (!line.sliceId) continue;
+        const slice = sliceCache.get(line.sliceId)!;
+        if (!cutFitsOnSlice(line.cutLengthM, line.cutWidthM, slice)) {
+          const err = new Error(
+            `Cut does not fit on slice ${slice.kind.name} (${formatDims(slice.lengthM, slice.widthM, slice.thicknessM)})`,
+          );
+          (err as Error & { statusCode?: number }).statusCode = 400;
           throw err;
         }
+      }
+
+      const kindCache = new Map<string, { name: string }>();
+      for (const line of normalizedLines) {
+        if (line.sliceId || kindCache.has(line.kindId)) continue;
+        const kind = await tx.marbleKind.findUnique({
+          where: { id: line.kindId },
+        });
+        if (!kind) {
+          const err = new Error("Marble kind not found");
+          (err as Error & { statusCode?: number }).statusCode = 400;
+          throw err;
+        }
+        kindCache.set(line.kindId, kind);
       }
 
       const pieces: Array<{
@@ -179,40 +240,62 @@ router.post("/", async (req, res, next) => {
         cutWidthM: number;
         lineTotal: number;
         sellingPerSqm: number;
+        inventorySlices: number;
+        inventoryAreaSqm: number;
       }> = [];
 
       let linesSubtotal = 0;
 
       for (const line of normalizedLines) {
+        const area = line.cutLengthM * line.cutWidthM * line.qty;
+        if (!line.sliceId) {
+          const kind = kindCache.get(line.kindId)!;
+          const unitPrice = Math.max(0, Math.round(line.sellingPerSqm ?? 0));
+          const lineTotal = Math.round(area * unitPrice);
+          linesSubtotal += lineTotal;
+          pieces.push({
+            kind: kind.name,
+            dims: formatDims(line.cutLengthM, line.cutWidthM, line.thicknessM),
+            thickness: `${line.thicknessM} m`,
+            edges: "—",
+            qty: line.qty,
+            price: unitPrice,
+            sliceId: "",
+            cutLengthM: line.cutLengthM,
+            cutWidthM: line.cutWidthM,
+            lineTotal,
+            sellingPerSqm: unitPrice,
+            inventorySlices: 0,
+            inventoryAreaSqm: 0,
+          });
+          continue;
+        }
         const slice = sliceCache.get(line.sliceId)!;
-        const area = cutAreaSqm(line.cutLengthM, line.cutWidthM, line.qty);
-        const lineTotal = Math.round(area * slice.sellingPerSqm);
+        const unitPrice =
+          line.sellingPerSqm === undefined
+            ? slice.sellingPerSqm
+            : Math.max(0, Math.round(line.sellingPerSqm));
+        const lineTotal = Math.round(area * unitPrice);
         linesSubtotal += lineTotal;
+        const reserved = wholeSliceReservation(slice, line.qty);
         pieces.push({
           kind: slice.kind.name,
           dims: formatDims(line.cutLengthM, line.cutWidthM, slice.thicknessM),
           thickness: `${slice.thicknessM} m`,
           edges: "—",
           qty: line.qty,
-          price: slice.sellingPerSqm,
+          price: unitPrice,
           sliceId: line.sliceId,
           cutLengthM: line.cutLengthM,
           cutWidthM: line.cutWidthM,
           lineTotal,
-          sellingPerSqm: slice.sellingPerSqm,
+          sellingPerSqm: unitPrice,
+          inventorySlices: reserved.inventorySlices,
+          inventoryAreaSqm: reserved.inventoryAreaSqm,
         });
       }
 
-      for (const [sliceId, neededArea] of usageBySlice) {
-        await tx.marbleSlice.update({
-          where: { id: sliceId },
-          data: {
-            consumedNetAreaSqm: {
-              increment: neededArea,
-            },
-          },
-        });
-      }
+      await consumeReservations(tx, pieces);
 
       const total = linesSubtotal + edgesPrice;
       const kind =
@@ -233,6 +316,7 @@ router.post("/", async (req, res, next) => {
           edgeRoundingMeters: edgesPrice > 0 ? meters : [],
           status: normalizeOrderStatus(String(status)),
           staff: actor.staffName,
+          inventoryDisposition: "reserved",
           pieces,
           dimensions: pieces[0]?.dims,
           thickness: pieces[0]?.thickness,
@@ -254,12 +338,16 @@ router.post("/", async (req, res, next) => {
     res.status(201).json(serializeOrder(order));
   } catch (err) {
     const statusCode = (err as { statusCode?: number }).statusCode;
-    if (statusCode === 409 && err instanceof Error) {
-      res.status(409).json({ error: err.message });
+    if (statusCode && err instanceof Error) {
+      res.status(statusCode).json({ error: err.message });
       return;
     }
     if (err instanceof Error && err.message.startsWith("Slice not found")) {
       res.status(400).json({ error: err.message });
+      return;
+    }
+    if (err instanceof SliceStockError) {
+      res.status(409).json({ error: err.message });
       return;
     }
     next(err);
@@ -347,8 +435,16 @@ router.patch("/:orderNumber", async (req, res, next) => {
       return;
     }
 
-    const body = req.body as { status?: string; orderNumber?: string };
-    const data: { status?: string; orderNumber?: string } = {};
+    const body = req.body as {
+      status?: string;
+      orderNumber?: string;
+      sliceDisposition?: string;
+    };
+    const data: {
+      status?: string;
+      orderNumber?: string;
+      inventoryDisposition?: string;
+    } = {};
 
     if (body.status !== undefined) {
       const normalized = normalizeOrderStatus(String(body.status));
@@ -373,10 +469,50 @@ router.patch("/:orderNumber", async (req, res, next) => {
       return;
     }
 
-    const updated = await prisma.order.update({
-      where: { id: order.id },
-      data,
-      include: { deposits: true },
+    const previous = normalizeOrderStatus(order.status);
+    const currentDisposition = order.inventoryDisposition || "reserved";
+    let inventoryOp: "release" | "consume" | null = null;
+
+    const holdsSlices = order.pieces.some((piece) => reservationOf(piece));
+
+    if (data.status === "ملغاة" && previous !== "ملغاة" && holdsSlices) {
+      const choice = body.sliceDisposition;
+      if (choice !== "return" && choice !== "waste") {
+        res.status(400).json({
+          error:
+            "Choose whether the slice returns to inventory or is wasted",
+        });
+        return;
+      }
+      if (choice === "return") {
+        if (currentDisposition !== "returned") inventoryOp = "release";
+        data.inventoryDisposition = "returned";
+      } else {
+        if (currentDisposition === "returned") inventoryOp = "consume";
+        data.inventoryDisposition = "wasted";
+      }
+    } else if (
+      data.status !== undefined &&
+      data.status !== "ملغاة" &&
+      previous === "ملغاة" &&
+      currentDisposition === "returned"
+    ) {
+      inventoryOp = "consume";
+      data.inventoryDisposition = "reserved";
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (inventoryOp === "release") {
+        await releaseReservations(tx, order.pieces);
+      }
+      if (inventoryOp === "consume") {
+        await consumeReservations(tx, order.pieces);
+      }
+      return tx.order.update({
+        where: { id: order.id },
+        data,
+        include: { deposits: true },
+      });
     });
 
     await recordStaffAction(
@@ -387,6 +523,11 @@ router.patch("/:orderNumber", async (req, res, next) => {
 
     res.json(serializeOrder(updated));
   } catch (err) {
+    const statusCode = (err as { statusCode?: number }).statusCode;
+    if ((statusCode || err instanceof SliceStockError) && err instanceof Error) {
+      res.status(statusCode || 409).json({ error: err.message });
+      return;
+    }
     next(err);
   }
 });
@@ -402,19 +543,8 @@ router.delete("/:orderNumber", async (req, res, next) => {
     }
 
     await prisma.$transaction(async (tx) => {
-      for (const piece of order.pieces) {
-        if (!piece.sliceId) continue;
-        const cutLen = piece.cutLengthM ?? 0;
-        const cutWid = piece.cutWidthM ?? 0;
-        const qty = piece.qty ?? 1;
-        if (cutLen <= 0 || cutWid <= 0) continue;
-        const area = cutAreaSqm(cutLen, cutWid, qty);
-        await tx.marbleSlice.updateMany({
-          where: { id: piece.sliceId },
-          data: {
-            consumedNetAreaSqm: { decrement: area },
-          },
-        });
+      if ((order.inventoryDisposition || "reserved") === "reserved") {
+        await releaseReservations(tx, order.pieces);
       }
       await tx.order.delete({ where: { id: order.id } });
     });

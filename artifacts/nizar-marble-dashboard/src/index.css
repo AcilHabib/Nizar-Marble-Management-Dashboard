@@ -143,11 +143,11 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   line-height: 1.1;
 }
 .receipt-brand-sub {
-  margin: 0.35rem 0 0;
-  font-size: 1.75rem;
+  margin: 0.4rem 0 0;
+  font-size: 1.15rem;
   font-weight: 700;
   color: #000;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
 }
 .receipt-header {
   display: flex;

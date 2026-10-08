@@ -4,10 +4,14 @@ import { Loader2, Trash2 } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 import {
   api,
+  normalizeOrderStatus,
+  orderUsesInventorySlice,
   type Order,
   type OrderStatus,
+  type SliceDisposition,
 } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
+import { CancelOrderDialog } from '@/components/cancel-order-dialog';
 import { OrderStatusPicker } from '@/components/order-status-picker';
 
 type Lang = 'ar' | 'fr';
@@ -34,12 +38,19 @@ export function OrderTableRow({
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
   const [navigating, setNavigating] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
 
   const updateMutation = useMutation({
-    mutationFn: (body: { status?: OrderStatus; orderNumber?: string }) =>
-      api.updateOrder(order.orderNumber, body),
+    mutationFn: (body: {
+      status?: OrderStatus;
+      orderNumber?: string;
+      sliceDisposition?: SliceDisposition;
+    }) => api.updateOrder(order.orderNumber, body),
     onSuccess: (updated) => {
+      setCancelOpen(false);
       qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['marble-kinds'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-metrics'] });
       if (updated.orderNumber !== order.orderNumber) {
         qc.removeQueries({ queryKey: ['order', order.orderNumber] });
         setLocation(`/orders/${updated.orderNumber}`);
@@ -51,6 +62,7 @@ export function OrderTableRow({
     mutationFn: () => api.deleteOrder(order.orderNumber),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['marble-kinds'] });
       qc.invalidateQueries({ queryKey: ['dashboard-metrics'] });
     },
   });
@@ -119,8 +131,40 @@ export function OrderTableRow({
           value={order.status}
           lang={lang}
           disabled={updateMutation.isPending}
-          onChange={(status) => updateMutation.mutate({ status })}
+          onChange={(status) => {
+            if (
+              status === 'ملغاة' &&
+              normalizeOrderStatus(order.status) !== 'ملغاة' &&
+              orderUsesInventorySlice(order)
+            ) {
+              updateMutation.reset();
+              setCancelOpen(true);
+              return;
+            }
+            updateMutation.mutate({ status });
+          }}
         />
+        {updateMutation.isError && (
+          <p className="mt-1 max-w-[160px] text-[10px] text-[#D95C55]">
+            {updateMutation.error.message}
+          </p>
+        )}
+        {cancelOpen && (
+          <CancelOrderDialog
+            lang={lang}
+            pending={updateMutation.isPending}
+            error={
+              updateMutation.isError ? updateMutation.error.message : undefined
+            }
+            onClose={() => {
+              updateMutation.reset();
+              setCancelOpen(false);
+            }}
+            onChoose={(sliceDisposition) =>
+              updateMutation.mutate({ status: 'ملغاة', sliceDisposition })
+            }
+          />
+        )}
       </td>
       <td className="px-5 py-3 text-end">
         <div className="flex items-center justify-end gap-1">

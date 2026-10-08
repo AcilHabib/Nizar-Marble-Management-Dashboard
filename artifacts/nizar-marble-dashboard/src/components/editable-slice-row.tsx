@@ -100,6 +100,9 @@ export function EditableSliceRow({
 
   const supplierName =
     suppliers.find((s) => s.id === draft.supplierId)?.name ?? slice.supplier.name;
+  const stockArea = slice.availableNetAreaSqm;
+  const stockPurchase = Math.round(stockArea * slice.purchasePerSqm);
+  const stockSelling = Math.round(stockArea * slice.sellingPerSqm);
 
   const numInput = (
     value: number,
@@ -167,14 +170,19 @@ export function EditableSliceRow({
             })),
           )
         ) : (
-          formatNumber(slice.sliceCount)
+          <>
+            {formatNumber(slice.availableSliceCount ?? slice.sliceCount)}
+            {(slice.availableSliceCount ?? slice.sliceCount) < slice.sliceCount && (
+              <span className="text-[#8B949A]"> / {formatNumber(slice.sliceCount)}</span>
+            )}
+          </>
         )}
       </td>
       <td className="digits-latin px-4 py-2.5">
         {slice.wasteAreaOneSqm > 0 ? formatAreaSqm(slice.wasteAreaOneSqm) : '—'}
       </td>
       <td className="digits-latin px-4 py-2.5">
-        {formatAreaSqm(slice.totalAreaSqm)}
+        {formatAreaSqm(slice.availableNetAreaSqm)}
       </td>
       <td className="px-4 py-2.5 text-end">
         {editing ? (
@@ -186,7 +194,7 @@ export function EditableSliceRow({
         )}
       </td>
       <td className="mono digits-latin px-4 py-2.5 text-end">
-        {formatCurrency(slice.purchaseTotal, lang)}
+        {formatCurrency(stockPurchase, lang)}
       </td>
       <td className="px-4 py-2.5 text-end">
         {editing ? (
@@ -198,7 +206,7 @@ export function EditableSliceRow({
         )}
       </td>
       <td className="mono digits-latin px-4 py-2.5 text-end">
-        {formatCurrency(slice.sellingTotal, lang)}
+        {formatCurrency(stockSelling, lang)}
       </td>
       <td className="px-4 py-2.5 text-end">
         <div className="flex items-center justify-end gap-0.5">

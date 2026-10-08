@@ -8,11 +8,7 @@ import {
   type MarbleSlice,
   type OrderCutLine,
 } from '@/lib/api';
-import {
-  formatAreaSqm,
-  formatCurrency,
-  formatNumber,
-} from '@/lib/format';
+import { formatCurrency, formatNumber } from '@/lib/format';
 import { computeEdgeRoundingTotal } from '@/lib/edge-rounding';
 
 type Lang = 'ar' | 'fr';
@@ -28,12 +24,26 @@ const labels = {
     cuts: 'قطع الطلب',
     addCut: 'إضافة قطعة',
     marbleKind: 'نوع الرخام',
+    source: 'مصدر القطعة',
+    useRealSlice: 'من شريحة في المخزون',
+    withoutSlice: 'بدون شريحة',
     inventorySlice: 'شريحة المخزون',
     cutLength: 'طول القطع (م)',
     cutWidth: 'عرض القطع (م)',
+    thickness: 'السماكة (م)',
+    noInventory: 'هذه القطعة لا تُخصم من المخزون.',
     qty: 'الكمية',
     lineTotal: 'سعر البيع',
-    available: 'متاح',
+    unitPrice: 'سعر المتر المربع',
+    specialUnitPrice: 'سعر خاص لهذا الطلب',
+    autoUnitPrice: 'سعر الشريحة',
+    available: 'شرائح متبقية',
+    remainderWasted:
+      'باقي هذه الشريحة يُهدر. الطلب التالي يحتاج شريحة أخرى كاملة.',
+    cutDoesNotFit:
+      'مقاس القطع أكبر من الشريحة. اختر شريحة أكبر أو قلّل الأبعاد.',
+    notEnoughSlices:
+      'لا توجد شرائح كاملة كافية. كل قطعة تستهلك شريحة كاملة.',
     edgeRounding: 'تشطيب الحواف',
     pricePerMeter: 'سعر المتر (د.ج)',
     lengthMeters: 'الطول (م)',
@@ -46,9 +56,8 @@ const labels = {
     selectCustomer: 'اختر عميلاً',
     selectKind: 'اختر نوع الرخام',
     selectSlice: 'اختر شريحة',
-    sliceExhausted:
-      'مساحة هذه الشريحة في المخزون غير كافية. اختر شريحة أخرى أو قلّل الأبعاد/الكمية.',
-    noSlices: 'لا توجد شرائح متاحة لهذا النوع',
+    noSlices: 'لا توجد شرائح متاحة. يمكنك إنشاء القطعة بدون شريحة.',
+    needThickness: 'أدخل سماكة القطعة',
   },
   fr: {
     customer: 'Client',
@@ -60,12 +69,26 @@ const labels = {
     cuts: 'Pièces à découper',
     addCut: 'Ajouter une pièce',
     marbleKind: 'Type de marbre',
+    source: 'Origine de la pièce',
+    useRealSlice: 'Depuis une dalle en stock',
+    withoutSlice: 'Sans dalle',
     inventorySlice: 'Dalle en stock',
     cutLength: 'Longueur coupe (m)',
     cutWidth: 'Largeur coupe (m)',
+    thickness: 'Épaisseur (m)',
+    noInventory: 'Cette pièce ne sort pas du stock.',
     qty: 'Quantité',
     lineTotal: 'Prix vente',
-    available: 'Dispo',
+    unitPrice: 'Prix au m²',
+    specialUnitPrice: 'Prix spécial pour cette commande',
+    autoUnitPrice: 'Prix de la dalle',
+    available: 'Dalles restantes',
+    remainderWasted:
+      'Le reste de cette dalle est perdu. La commande suivante doit utiliser une autre dalle entière.',
+    cutDoesNotFit:
+      'La découpe ne tient pas sur la dalle. Choisissez une dalle plus grande ou réduisez les dimensions.',
+    notEnoughSlices:
+      'Pas assez de dalles entières. Chaque pièce consomme une dalle complète.',
     edgeRounding: 'Finition des chants',
     pricePerMeter: 'Prix au mètre (DA)',
     lengthMeters: 'Longueur (m)',
@@ -78,26 +101,33 @@ const labels = {
     selectCustomer: 'Choisir un client',
     selectKind: 'Choisir le type',
     selectSlice: 'Choisir la dalle',
-    sliceExhausted:
-      'Surface insuffisante sur cette dalle. Choisissez une autre dalle ou réduisez dimensions/quantité.',
-    noSlices: 'Aucune dalle disponible pour ce type',
+    noSlices: 'Aucune dalle disponible. Vous pouvez créer la pièce sans dalle.',
+    needThickness: 'Indiquez l’épaisseur',
   },
 };
 
 type DraftLine = {
   kindId: string;
+  useSlice: boolean;
   sliceId: string;
   cutLengthM: number;
   cutWidthM: number;
+  thicknessM: number;
   qty: number;
+  specialPrice: boolean;
+  unitPrice: number;
 };
 
 const emptyLine = (): DraftLine => ({
   kindId: '',
+  useSlice: true,
   sliceId: '',
   cutLengthM: 0.5,
   cutWidthM: 0.5,
+  thicknessM: 0.02,
   qty: 1,
+  specialPrice: false,
+  unitPrice: 0,
 });
 
 function Modal({
@@ -156,16 +186,40 @@ function lineArea(line: DraftLine) {
   return line.cutLengthM * line.cutWidthM * line.qty;
 }
 
-function draftUsageForSlice(lines: DraftLine[], sliceId: string, skipIndex?: number) {
-  return lines.reduce((sum, line, i) => {
-    if (i === skipIndex || line.sliceId !== sliceId) return sum;
-    return sum + lineArea(line);
-  }, 0);
+function availableSlices(slice: MarbleSlice) {
+  if (typeof slice.availableSliceCount === 'number') return slice.availableSliceCount;
+  if (slice.areaOneSqm > 0) {
+    return Math.floor(slice.availableNetAreaSqm / slice.areaOneSqm + 1e-6);
+  }
+  return 0;
+}
+
+function slicesNeeded(lines: DraftLine[], sliceId: string) {
+  return lines.reduce(
+    (sum, line) =>
+      line.useSlice && line.sliceId === sliceId ? sum + line.qty : sum,
+    0,
+  );
+}
+
+function cutFits(line: DraftLine, slice: MarbleSlice) {
+  const fitsOrientation =
+    (line.cutLengthM <= slice.lengthM + 1e-6 && line.cutWidthM <= slice.widthM + 1e-6) ||
+    (line.cutLengthM <= slice.widthM + 1e-6 && line.cutWidthM <= slice.lengthM + 1e-6);
+  const pieceArea = line.cutLengthM * line.cutWidthM;
+  return fitsOrientation && pieceArea <= slice.areaOneSqm + 1e-6;
+}
+
+function unitPriceFor(line: DraftLine, slice?: MarbleSlice) {
+  if (!line.useSlice) return Math.max(0, Math.round(line.unitPrice));
+  if (!slice) return 0;
+  if (line.specialPrice) return Math.max(0, Math.round(line.unitPrice));
+  return slice.sellingPerSqm;
 }
 
 function computeLinePrice(line: DraftLine, slice?: MarbleSlice) {
-  if (!slice) return 0;
-  return Math.round(lineArea(line) * slice.sellingPerSqm);
+  if (line.useSlice && !slice) return 0;
+  return Math.round(lineArea(line) * unitPriceFor(line, slice));
 }
 
 export function OrderCreateForm({
@@ -205,10 +259,7 @@ export function OrderCreateForm({
       const map = new Map<string, MarbleSlice[]>();
       for (const id of kindIds) {
         const { slices } = await api.getMarbleKind(id);
-        map.set(
-          id,
-          slices.filter((s) => s.availableNetAreaSqm > 0.0001),
-        );
+        map.set(id, slices);
       }
       return map;
     },
@@ -254,13 +305,19 @@ export function OrderCreateForm({
   const edgeRoundingPrice = computeEdgeRoundingTotal(edgePricePerM, edgeMeters);
   const orderTotal = linesSubtotal + edgeRoundingPrice;
 
-  const warnings = lines.map((line, index) => {
+  const warnings = lines.map((line) => {
+    if (!line.useSlice) {
+      if (line.kindId && (!Number.isFinite(line.thicknessM) || line.thicknessM <= 0)) {
+        return t.needThickness;
+      }
+      return null;
+    }
     if (!line.sliceId) return null;
     const slice = sliceById.get(line.sliceId);
-    if (!slice) return t.sliceExhausted;
-    const needed = draftUsageForSlice(lines, line.sliceId);
-    const available = slice.availableNetAreaSqm;
-    if (needed > available + 1e-6) return t.sliceExhausted;
+    if (!slice) return t.notEnoughSlices;
+    if (!cutFits(line, slice)) return t.cutDoesNotFit;
+    const needed = slicesNeeded(lines, line.sliceId);
+    if (needed > availableSlices(slice)) return t.notEnoughSlices;
     return null;
   });
 
@@ -271,6 +328,18 @@ export function OrderCreateForm({
         const next = { ...line, ...patch };
         if (patch.kindId !== undefined && patch.kindId !== line.kindId) {
           next.sliceId = '';
+          if (!next.useSlice) {
+            const price =
+              slicesByKind.get(String(patch.kindId))?.[0]?.sellingPerSqm ?? 0;
+            if (price > 0) next.unitPrice = price;
+          }
+        }
+        if (patch.useSlice === false) {
+          next.sliceId = '';
+          next.specialPrice = true;
+        }
+        if (patch.useSlice === true) {
+          next.specialPrice = false;
         }
         return next;
       }),
@@ -285,19 +354,41 @@ export function OrderCreateForm({
       return;
     }
     if (warnings.some(Boolean)) {
-      setSubmitError(t.sliceExhausted);
+      setSubmitError(warnings.find(Boolean) ?? t.notEnoughSlices);
       return;
     }
-    const payload: OrderCutLine[] = lines.map((l) => ({
-      sliceId: l.sliceId,
-      cutLengthM: l.cutLengthM,
-      cutWidthM: l.cutWidthM,
-      qty: l.qty,
-    }));
-    if (payload.some((l) => !l.sliceId)) {
+    if (lines.some((l) => !l.kindId)) {
+      setSubmitError(t.selectKind);
+      return;
+    }
+    if (lines.some((l) => l.useSlice && !l.sliceId)) {
       setSubmitError(t.selectSlice);
       return;
     }
+    if (lines.some((l) => !l.useSlice && l.thicknessM <= 0)) {
+      setSubmitError(t.needThickness);
+      return;
+    }
+    const payload: OrderCutLine[] = lines.map((l) =>
+      l.useSlice
+        ? {
+            sliceId: l.sliceId,
+            cutLengthM: l.cutLengthM,
+            cutWidthM: l.cutWidthM,
+            qty: l.qty,
+            ...(l.specialPrice
+              ? { sellingPerSqm: Math.max(0, Math.round(l.unitPrice)) }
+              : {}),
+          }
+        : {
+            kindId: l.kindId,
+            cutLengthM: l.cutLengthM,
+            cutWidthM: l.cutWidthM,
+            thicknessM: l.thicknessM,
+            qty: l.qty,
+            sellingPerSqm: Math.max(0, Math.round(l.unitPrice)),
+          },
+    );
     createOrder.mutate({
       customerId,
       lines: payload,
@@ -351,9 +442,11 @@ export function OrderCreateForm({
           <div className="space-y-4">
             {lines.map((line, index) => {
               const slices = line.kindId ? slicesByKind.get(line.kindId) ?? [] : [];
-              const slice = sliceById.get(line.sliceId);
+              const stockSlices = slices.filter((s) => availableSlices(s) > 0);
+              const slice = line.useSlice ? sliceById.get(line.sliceId) : undefined;
               const linePrice = computeLinePrice(line, slice);
               const warn = warnings[index];
+              const suggestedPrice = slices[0]?.sellingPerSqm ?? 0;
               return (
                 <div key={index} className="rounded-lg border border-[#F0EEE9] bg-[#FBFAF8] p-3">
                   <div className="mb-3 flex items-center justify-between">
@@ -367,7 +460,7 @@ export function OrderCreateForm({
                     )}
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    <label className="text-[10px] font-semibold">
+                    <label className="text-[10px] font-semibold sm:col-span-2">
                       {t.marbleKind}
                       <select
                         value={line.kindId}
@@ -382,25 +475,88 @@ export function OrderCreateForm({
                         ))}
                       </select>
                     </label>
-                    <label className="text-[10px] font-semibold">
+                    <div className="text-[10px] font-semibold sm:col-span-2">
+                      {t.source}
+                      <div className="mt-1 grid grid-cols-2 gap-1 rounded-md bg-[#F1EEE8] p-1">
+                        <button
+                          type="button"
+                          data-testid={`button-use-slice-${index}`}
+                          onClick={() =>
+                            updateLine(index, { useSlice: true, specialPrice: false })
+                          }
+                          className={`rounded px-2 py-2 text-[10px] font-bold ${
+                            line.useSlice
+                              ? 'bg-white text-[#3A3D3F] shadow-sm'
+                              : 'text-[#6E665B]'
+                          }`}
+                        >
+                          {t.useRealSlice}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`button-without-slice-${index}`}
+                          onClick={() =>
+                            updateLine(index, {
+                              useSlice: false,
+                              sliceId: '',
+                              specialPrice: true,
+                              unitPrice: line.unitPrice || suggestedPrice,
+                            })
+                          }
+                          className={`rounded px-2 py-2 text-[10px] font-bold ${
+                            !line.useSlice
+                              ? 'bg-white text-[#3A3D3F] shadow-sm'
+                              : 'text-[#6E665B]'
+                          }`}
+                        >
+                          {t.withoutSlice}
+                        </button>
+                      </div>
+                    </div>
+                    {line.useSlice ? (
+                    <label className="text-[10px] font-semibold sm:col-span-2">
                       {t.inventorySlice}
                       <select
                         value={line.sliceId}
                         disabled={!line.kindId}
-                        onChange={(e) => updateLine(index, { sliceId: e.target.value })}
+                        onChange={(e) => {
+                          const sliceId = e.target.value;
+                          const next = stockSlices.find((s) => s.id === sliceId);
+                          updateLine(index, {
+                            sliceId,
+                            unitPrice: next?.sellingPerSqm ?? 0,
+                            specialPrice: false,
+                          });
+                        }}
                         className="mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px] disabled:opacity-50"
                       >
                         <option value="">{t.selectSlice}</option>
-                        {slices.map((s) => (
+                        {stockSlices.map((s) => (
                           <option key={s.id} value={s.id}>
                             {formatNumber(s.lengthM, 2)}×{formatNumber(s.widthM, 2)}×
                             {formatNumber(s.thicknessM, 3)} m — {t.available}{' '}
-                            {formatAreaSqm(s.availableNetAreaSqm)}
+                            {formatNumber(availableSlices(s))}
                           </option>
                         ))}
                       </select>
                     </label>
-                    {line.kindId && slices.length === 0 && (
+                    ) : (
+                    <label className="text-[10px] font-semibold sm:col-span-2">
+                      {t.thickness}
+                      <input
+                        data-testid={`input-thickness-${index}`}
+                        type="number"
+                        min={0.001}
+                        step="0.001"
+                        value={line.thicknessM || ''}
+                        onChange={(e) =>
+                          updateLine(index, { thicknessM: Number(e.target.value) })
+                        }
+                        className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+                      />
+                    </label>
+                    )}
+                    {line.useSlice && line.kindId && !sliceQueries.isFetching && stockSlices.length === 0 && (
                       <p className="sm:col-span-2 text-[10px] text-[#D99A32]">{t.noSlices}</p>
                     )}
                     <label className="text-[10px] font-semibold">
@@ -438,9 +594,63 @@ export function OrderCreateForm({
                       />
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#E7E5E0] pt-3 text-[11px]">
-                    <span className="text-[#5F6B76]">{t.lineTotal}</span>
-                    <b className="mono digits-latin">{formatCurrency(linePrice, lang)}</b>
+                  {slice && (
+                    <p className="mt-3 text-[10px] leading-relaxed text-[#9A6B22]">
+                      {t.remainderWasted}
+                    </p>
+                  )}
+                  {!line.useSlice && line.kindId && (
+                    <p className="mt-3 text-[10px] leading-relaxed text-[#5F6B76]">
+                      {t.noInventory}
+                    </p>
+                  )}
+                  <div className="mt-3 space-y-2 border-t border-[#E7E5E0] pt-3 text-[11px]">
+                    {line.useSlice && (
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[#5F6B76]">{t.autoUnitPrice}</span>
+                      <b className="mono digits-latin">
+                        {slice ? formatCurrency(slice.sellingPerSqm, lang) : '—'}
+                        <span className="ms-1 font-medium text-[#8B949A]">/ m²</span>
+                      </b>
+                    </div>
+                    )}
+                    {line.useSlice && (
+                    <label className="flex items-center gap-2 text-[10px] font-semibold text-[#3A3D3F]">
+                      <input
+                        type="checkbox"
+                        data-testid={`checkbox-special-price-${index}`}
+                        checked={line.specialPrice}
+                        disabled={!slice}
+                        onChange={(e) =>
+                          updateLine(index, {
+                            specialPrice: e.target.checked,
+                            unitPrice: slice?.sellingPerSqm ?? line.unitPrice,
+                          })
+                        }
+                      />
+                      {t.specialUnitPrice}
+                    </label>
+                    )}
+                    {(line.specialPrice || !line.useSlice) && (
+                      <label className="block text-[10px] font-semibold">
+                        {t.unitPrice}
+                        <input
+                          data-testid={`input-unit-price-${index}`}
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={line.unitPrice || ''}
+                          onChange={(e) =>
+                            updateLine(index, { unitPrice: Number(e.target.value) || 0 })
+                          }
+                          className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+                        />
+                      </label>
+                    )}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[#5F6B76]">{t.lineTotal}</span>
+                      <b className="mono digits-latin">{formatCurrency(linePrice, lang)}</b>
+                    </div>
                   </div>
                   {warn && (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-[#F5DFC4] bg-[#FCF4E5] px-3 py-2 text-[10px] text-[#9A6B22]">

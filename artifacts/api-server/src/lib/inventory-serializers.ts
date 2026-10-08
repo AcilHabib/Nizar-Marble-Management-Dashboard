@@ -1,5 +1,9 @@
 import type { MarbleKind, MarbleSlice, Supplier } from "@workspace/db";
-import { sliceAvailableNetAreaSqm } from "./slice-availability";
+import {
+  sliceAvailableCount,
+  sliceAvailableNetAreaSqm,
+  sliceNetAreaOne,
+} from "./slice-availability";
 import { sliceRowMetrics, type WasteRect } from "./slice-math";
 
 export type SupplierDto = {
@@ -31,6 +35,7 @@ export type MarbleSliceDto = {
   purchaseTotal: number;
   sellingTotal: number;
   availableNetAreaSqm: number;
+  availableSliceCount: number;
   createdAt: string;
 };
 
@@ -52,6 +57,7 @@ export function serializeSlice(
     sellingPerSqm: slice.sellingPerSqm,
     ...metrics,
     availableNetAreaSqm: sliceAvailableNetAreaSqm(slice),
+    availableSliceCount: sliceAvailableCount(slice),
     createdAt: slice.createdAt.toISOString(),
   };
 }
@@ -80,12 +86,14 @@ export function serializeKind(
   let totalSellingValue = 0;
   const supplierIds = new Set<string>();
 
+  let availableSlices = 0;
   for (const slice of kind.slices) {
-    const wastes = (slice.wastes ?? []) as WasteRect[];
-    const m = sliceRowMetrics({ ...slice, wastes });
-    totalAreaSqm += m.totalAreaSqm;
-    totalPurchaseValue += m.purchaseTotal;
-    totalSellingValue += m.sellingTotal;
+    const available = sliceAvailableCount(slice);
+    const area = available * sliceNetAreaOne(slice);
+    availableSlices += available;
+    totalAreaSqm += area;
+    totalPurchaseValue += Math.round(area * slice.purchasePerSqm);
+    totalSellingValue += Math.round(area * slice.sellingPerSqm);
     supplierIds.add(slice.supplierId);
   }
 
@@ -98,7 +106,7 @@ export function serializeKind(
     tone: kind.tone,
     createdAt: kind.createdAt.toISOString(),
     updatedAt: kind.updatedAt.toISOString(),
-    sliceCount: kind.slices.reduce((n, s) => n + s.sliceCount, 0),
+    sliceCount: availableSlices,
     totalAreaSqm: Math.round(totalAreaSqm * 100) / 100,
     totalPurchaseValue,
     totalSellingValue,

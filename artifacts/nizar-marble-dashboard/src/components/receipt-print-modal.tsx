@@ -15,13 +15,13 @@ export function ReceiptPrintModal({
     uiLang === 'ar'
       ? {
           title: 'طباعة الإيصال',
-          hint: 'سيتم طباعة الإيصال بالفرنسية (SARL NAZAR).',
+          hint: 'سيتم طباعة الإيصال بالفرنسية (S.A.R.L NEZZAR).',
           cancel: 'إلغاء',
           print: 'طباعة',
         }
       : {
           title: 'Imprimer le reçu',
-          hint: 'Le reçu sera imprimé en français (SARL NAZAR).',
+          hint: 'Le reçu sera imprimé en français (S.A.R.L NEZZAR).',
           cancel: 'Annuler',
           print: 'Imprimer',
         };

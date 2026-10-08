@@ -17,8 +17,10 @@ type OrderPiece {
   sliceId       String @default("")
   cutLengthM    Float  @default(0)
   cutWidthM     Float  @default(0)
-  lineTotal     Int    @default(0)
-  sellingPerSqm Int    @default(0)
+  lineTotal        Int   @default(0)
+  sellingPerSqm    Int   @default(0)
+  inventorySlices  Int   @default(0)
+  inventoryAreaSqm Float @default(0)
 }
 
 model Customer {
@@ -47,9 +49,10 @@ model Order {
   staff              String
   dimensions         String?
   thickness          String?
-  edges              String?
-  pieces             OrderPiece[]
-  deposits           Deposit[]
+  edges                String?
+  pieces               OrderPiece[]
+  deposits             Deposit[]
+  inventoryDisposition String       @default("reserved")
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 }
@@ -122,6 +125,7 @@ model MarbleSlice {
   purchasePerSqm       Int
   sellingPerSqm        Int
   consumedNetAreaSqm   Float            @default(0)
+  consumedSliceCount   Int              @default(0)
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 }
