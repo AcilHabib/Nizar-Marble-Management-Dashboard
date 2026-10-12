@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, Minus, Plus, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -49,6 +49,7 @@ const labels = {
     lengthMeters: 'الطول (م)',
     addLength: 'إضافة طول',
     edgeRoundingTotal: 'مجموع تشطيب الحواف',
+    feeAmount: 'المبلغ (د.ج)',
     slicesSubtotal: 'مجموع القطع',
     orderTotal: 'إجمالي الطلب',
     cancel: 'إلغاء',
@@ -94,6 +95,7 @@ const labels = {
     lengthMeters: 'Longueur (m)',
     addLength: 'Ajouter une longueur',
     edgeRoundingTotal: 'Total finition chants',
+    feeAmount: 'Montant (DA)',
     slicesSubtotal: 'Sous-total pièces',
     orderTotal: 'Total commande',
     cancel: 'Annuler',
@@ -116,6 +118,7 @@ type DraftLine = {
   qty: number;
   specialPrice: boolean;
   unitPrice: number;
+  unitPriceTouched: boolean;
 };
 
 const emptyLine = (): DraftLine => ({
@@ -128,6 +131,7 @@ const emptyLine = (): DraftLine => ({
   qty: 1,
   specialPrice: false,
   unitPrice: 0,
+  unitPriceTouched: false,
 });
 
 function Modal({
@@ -240,6 +244,8 @@ export function OrderCreateForm({
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
   const [edgePricePerM, setEdgePricePerM] = useState(0);
   const [edgeMeters, setEdgeMeters] = useState<number[]>([0]);
+  const [pausePrice, setPausePrice] = useState(0);
+  const [levierPrice, setLevierPrice] = useState(0);
   const [submitError, setSubmitError] = useState('');
 
   const { data: customers = [] } = useQuery({
@@ -267,6 +273,24 @@ export function OrderCreateForm({
   });
 
   const slicesByKind = sliceQueries.data ?? new Map<string, MarbleSlice[]>();
+
+  useEffect(() => {
+    const loaded = sliceQueries.data;
+    if (!loaded) return;
+    setLines((prev) => {
+      let changed = false;
+      const next = prev.map((line) => {
+        if (line.useSlice || line.unitPriceTouched || line.unitPrice > 0 || !line.kindId) {
+          return line;
+        }
+        const price = loaded.get(line.kindId)?.[0]?.sellingPerSqm ?? 0;
+        if (price <= 0) return line;
+        changed = true;
+        return { ...line, unitPrice: price };
+      });
+      return changed ? next : prev;
+    });
+  }, [sliceQueries.data]);
 
   const sliceById = useMemo(() => {
     const m = new Map<string, MarbleSlice>();
@@ -303,7 +327,7 @@ export function OrderCreateForm({
     0,
   );
   const edgeRoundingPrice = computeEdgeRoundingTotal(edgePricePerM, edgeMeters);
-  const orderTotal = linesSubtotal + edgeRoundingPrice;
+  const orderTotal = linesSubtotal + edgeRoundingPrice + pausePrice + levierPrice;
 
   const warnings = lines.map((line) => {
     if (!line.useSlice) {
@@ -328,6 +352,7 @@ export function OrderCreateForm({
         const next = { ...line, ...patch };
         if (patch.kindId !== undefined && patch.kindId !== line.kindId) {
           next.sliceId = '';
+          next.unitPriceTouched = false;
           if (!next.useSlice) {
             const price =
               slicesByKind.get(String(patch.kindId))?.[0]?.sellingPerSqm ?? 0;
@@ -394,6 +419,8 @@ export function OrderCreateForm({
       lines: payload,
       edgeRoundingPricePerM: edgePricePerM,
       edgeRoundingMeters: edgeMeters,
+      pausePrice,
+      levierPrice,
     });
   };
 
@@ -641,7 +668,10 @@ export function OrderCreateForm({
                           step={1}
                           value={line.unitPrice || ''}
                           onChange={(e) =>
-                            updateLine(index, { unitPrice: Number(e.target.value) || 0 })
+                            updateLine(index, {
+                              unitPrice: Number(e.target.value) || 0,
+                              unitPriceTouched: true,
+                            })
                           }
                           className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
                         />
@@ -651,6 +681,10 @@ export function OrderCreateForm({
                       <span className="text-[#5F6B76]">{t.lineTotal}</span>
                       <b className="mono digits-latin">{formatCurrency(linePrice, lang)}</b>
                     </div>
+                    <p className="digits-latin text-[10px] text-[#8B949A]">
+                      {formatNumber(line.cutLengthM, 2)} × {formatNumber(line.cutWidthM, 2)} ×{' '}
+                      {formatNumber(line.qty)} × {formatNumber(unitPriceFor(line, slice))}
+                    </p>
                   </div>
                   {warn && (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-[#F5DFC4] bg-[#FCF4E5] px-3 py-2 text-[10px] text-[#9A6B22]">
@@ -740,6 +774,35 @@ export function OrderCreateForm({
           </div>
         </div>
 
+        <div className="grid gap-3 rounded-lg border border-[#E7E5E0] bg-white p-4 sm:grid-cols-2">
+          <label className="block text-[10px] font-semibold">
+            la pause
+            <input
+              data-testid="input-pause-fee"
+              type="number"
+              min={0}
+              step={1}
+              value={pausePrice || ''}
+              onChange={(e) => setPausePrice(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+              placeholder={t.feeAmount}
+              className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+            />
+          </label>
+          <label className="block text-[10px] font-semibold">
+            le levier
+            <input
+              data-testid="input-levier-fee"
+              type="number"
+              min={0}
+              step={1}
+              value={levierPrice || ''}
+              onChange={(e) => setLevierPrice(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+              placeholder={t.feeAmount}
+              className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+            />
+          </label>
+        </div>
+
         <div className="space-y-2 rounded-lg border border-[#E7E5E0] bg-white p-4 text-xs">
           <div className="flex justify-between text-[#5F6B76]">
             <span>{t.slicesSubtotal}</span>
@@ -748,6 +811,14 @@ export function OrderCreateForm({
           <div className="flex justify-between text-[#5F6B76]">
             <span>{t.edgeRounding}</span>
             <b className="mono digits-latin">{formatCurrency(edgeRoundingPrice, lang)}</b>
+          </div>
+          <div className="flex justify-between text-[#5F6B76]">
+            <span>la pause</span>
+            <b className="mono digits-latin">{formatCurrency(pausePrice, lang)}</b>
+          </div>
+          <div className="flex justify-between text-[#5F6B76]">
+            <span>le levier</span>
+            <b className="mono digits-latin">{formatCurrency(levierPrice, lang)}</b>
           </div>
           <div className="flex justify-between border-t border-[#E7E5E0] pt-2 text-sm font-bold">
             <span>{t.orderTotal}</span>

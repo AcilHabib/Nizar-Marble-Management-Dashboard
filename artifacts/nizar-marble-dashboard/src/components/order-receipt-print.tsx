@@ -1,4 +1,4 @@
-import type { Deposit, Order, OrderPiece } from '@/lib/api';
+import type { Deposit, Order } from '@/lib/api';
 import { depositSignedAmount } from '@/lib/api';
 import { formatEdgeRoundingBreakdown } from '@/lib/edge-rounding';
 import { formatCurrency, formatNumber } from '@/lib/format';
@@ -10,19 +10,18 @@ import {
 import {
   formatReceiptDimensions,
   formatReceiptSurface,
+  pieceAmount,
+  pieceUnitPrice,
 } from '@/lib/receipt-format';
 import { resolveMarbleImageUrl } from '@/lib/marble-image';
 
 const logoUrl = `${import.meta.env.BASE_URL}nizar-marble-logo.png`;
 
-function lineTotal(row: OrderPiece) {
-  return row.lineTotal && row.lineTotal > 0 ? row.lineTotal : row.qty * row.price;
-}
-
 const t = {
   receipt: 'Reçu',
   order: 'Commande',
   customer: 'Client',
+  phone: 'Téléphone',
   date: 'Date',
   staff: 'Responsable',
   status: 'Statut',
@@ -33,6 +32,9 @@ const t = {
   amount: 'Montant',
   slicesSubtotal: 'Sous-total pièces',
   edgeRounding: 'Finition des chants',
+  pauseFee: 'la pause',
+  levierFee: 'le levier',
+  unitPrice: 'Prix / m²',
   total: 'Total',
   paid: 'Payé',
   remaining: 'Restant',
@@ -77,13 +79,13 @@ export function OrderReceiptPrint({
       </header>
 
       <div className="receipt-owners">
-        <p>
-          <strong>Antar Nazar</strong> — 0550718568
-        </p>
-        <p>
+        <p className="receipt-owner-left">
           <strong>Sahnoun Nazar</strong> — 0550718589
         </p>
-        <p>
+        <p className="receipt-owner-right">
+          <strong>Antar Nazar</strong> — 0550718568
+        </p>
+        <p className="receipt-owner-center">
           <strong>{t.commercial}</strong> — 0563542842
         </p>
       </div>
@@ -107,6 +109,10 @@ export function OrderReceiptPrint({
           <div>
             <dt>{t.customer}</dt>
             <dd>{order.customer}</dd>
+          </div>
+          <div>
+            <dt>{t.phone}</dt>
+            <dd className="digits-latin">{order.customerPhone || '—'}</dd>
           </div>
           <div>
             <dt>{t.date}</dt>
@@ -134,6 +140,7 @@ export function OrderReceiptPrint({
             <th>{t.dimensions}</th>
             <th>{t.surface}</th>
             <th>{t.qty}</th>
+            <th>{t.unitPrice}</th>
             <th>{t.amount}</th>
           </tr>
         </thead>
@@ -144,14 +151,18 @@ export function OrderReceiptPrint({
               <td className="digits-latin">{formatReceiptDimensions(row)}</td>
               <td className="digits-latin">{formatReceiptSurface(row)}</td>
               <td className="digits-latin">{formatNumber(row.qty)}</td>
-              <td className="digits-latin">{formatCurrency(lineTotal(row), lang)}</td>
+              <td className="digits-latin">{formatCurrency(pieceUnitPrice(row), lang)}</td>
+              <td className="digits-latin">{formatCurrency(pieceAmount(row), lang)}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
       <div className="receipt-totals">
-        {(order.linesSubtotal > 0 || order.edgeRoundingPrice > 0) && (
+        {(order.linesSubtotal > 0 ||
+          order.edgeRoundingPrice > 0 ||
+          (order.pausePrice ?? 0) > 0 ||
+          (order.levierPrice ?? 0) > 0) && (
           <>
             <div className="receipt-total-row">
               <span>{t.slicesSubtotal}</span>
@@ -169,6 +180,22 @@ export function OrderReceiptPrint({
                     </span>
                   )}
                   {formatCurrency(order.edgeRoundingPrice, lang)}
+                </span>
+              </div>
+            )}
+            {(order.pausePrice ?? 0) > 0 && (
+              <div className="receipt-total-row">
+                <span>{t.pauseFee}</span>
+                <span className="digits-latin">
+                  {formatCurrency(order.pausePrice ?? 0, lang)}
+                </span>
+              </div>
+            )}
+            {(order.levierPrice ?? 0) > 0 && (
+              <div className="receipt-total-row">
+                <span>{t.levierFee}</span>
+                <span className="digits-latin">
+                  {formatCurrency(order.levierPrice ?? 0, lang)}
                 </span>
               </div>
             )}

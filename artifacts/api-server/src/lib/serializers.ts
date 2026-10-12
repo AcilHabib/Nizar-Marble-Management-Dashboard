@@ -41,11 +41,17 @@ export type OrderDto = {
   edgeRoundingPrice: number;
   edgeRoundingPricePerM: number;
   edgeRoundingMeters: number[];
+  pausePrice: number;
+  levierPrice: number;
+  customerPhone: string;
   pieces: Order["pieces"];
 };
 
 export function serializeOrder(
-  order: Order & { deposits: Deposit[] },
+  order: Order & {
+    deposits: Deposit[];
+    customerRecord?: { phone: string } | null;
+  },
 ): OrderDto {
   const paid = paidTotal(order.deposits);
   return {
@@ -67,6 +73,9 @@ export function serializeOrder(
     edgeRoundingPrice: order.edgeRoundingPrice ?? 0,
     edgeRoundingPricePerM: order.edgeRoundingPricePerM ?? 0,
     edgeRoundingMeters: order.edgeRoundingMeters ?? [],
+    pausePrice: order.pausePrice ?? 0,
+    levierPrice: order.levierPrice ?? 0,
+    customerPhone: order.customerPhone || order.customerRecord?.phone || "",
     pieces: order.pieces,
   };
 }

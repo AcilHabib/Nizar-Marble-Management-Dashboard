@@ -26,6 +26,16 @@ import {
 
 const router: IRouter = Router();
 
+const orderInclude = {
+  deposits: true,
+  customerRecord: { select: { phone: true } },
+} as const;
+
+function nonNegativeInt(value: unknown): number {
+  const n = Math.round(Number(value) || 0);
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
 function formatDims(cutLengthM: number, cutWidthM: number, thicknessM: number) {
   return `${cutLengthM} × ${cutWidthM} × ${thicknessM} m`;
 }
@@ -33,7 +43,7 @@ function formatDims(cutLengthM: number, cutWidthM: number, thicknessM: number) {
 router.get("/", async (_req, res, next) => {
   try {
     const orders = await prisma.order.findMany({
-      include: { deposits: true },
+      include: orderInclude,
       orderBy: { orderDate: "desc" },
     });
     res.json(orders.map(serializeOrder));
@@ -46,7 +56,10 @@ router.get("/:orderNumber", async (req, res, next) => {
   try {
     const order = await prisma.order.findUnique({
       where: { orderNumber: req.params.orderNumber },
-      include: { deposits: { orderBy: { depositDate: "desc" } } },
+      include: {
+        deposits: { orderBy: { depositDate: "desc" as const } },
+        customerRecord: { select: { phone: true } },
+      },
     });
     if (!order) {
       res.status(404).json({ error: "Order not found" });
@@ -81,6 +94,8 @@ router.post("/", async (req, res, next) => {
       edgeRoundingPrice,
       edgeRoundingPricePerM = 0,
       edgeRoundingMeters = [],
+      pausePrice: pausePriceRaw,
+      levierPrice: levierPriceRaw,
     } = req.body as {
       customerId?: string;
       status?: string;
@@ -88,6 +103,8 @@ router.post("/", async (req, res, next) => {
       edgeRoundingPrice?: number;
       edgeRoundingPricePerM?: number;
       edgeRoundingMeters?: number[];
+      pausePrice?: number;
+      levierPrice?: number;
     };
 
     if (!customerId || typeof customerId !== "string") {
@@ -169,6 +186,8 @@ router.post("/", async (req, res, next) => {
     ) {
       edgesPrice = Math.max(0, Math.round(Number(edgeRoundingPrice) || 0));
     }
+    const pausePrice = nonNegativeInt(pausePriceRaw);
+    const levierPrice = nonNegativeInt(levierPriceRaw);
 
     const order = await prisma.$transaction(async (tx) => {
       const slicesNeeded = new Map<string, number>();
@@ -297,7 +316,7 @@ router.post("/", async (req, res, next) => {
 
       await consumeReservations(tx, pieces);
 
-      const total = linesSubtotal + edgesPrice;
+      const total = linesSubtotal + edgesPrice + pausePrice + levierPrice;
       const kind =
         [...new Set(pieces.map((p) => p.kind))].filter(Boolean).join("، ") ||
         "—";
@@ -308,12 +327,15 @@ router.post("/", async (req, res, next) => {
           orderNumber,
           customerId: customer.id,
           customer: customer.fullName,
+          customerPhone: customer.phone,
           kind,
           total,
           linesSubtotal,
           edgeRoundingPrice: edgesPrice,
           edgeRoundingPricePerM: edgesPrice > 0 ? pricePerM : 0,
           edgeRoundingMeters: edgesPrice > 0 ? meters : [],
+          pausePrice,
+          levierPrice,
           status: normalizeOrderStatus(String(status)),
           staff: actor.staffName,
           inventoryDisposition: "reserved",
@@ -325,7 +347,7 @@ router.post("/", async (req, res, next) => {
               ? formatOrderEdgesSummary(pricePerM, meters, edgesPrice)
               : pieces[0]?.edges,
         },
-        include: { deposits: true },
+        include: orderInclude,
       });
     });
 
@@ -511,7 +533,7 @@ router.patch("/:orderNumber", async (req, res, next) => {
       return tx.order.update({
         where: { id: order.id },
         data,
-        include: { deposits: true },
+        include: orderInclude,
       });
     });
 

@@ -61,6 +61,9 @@ export type Order = {
   edgeRoundingPrice: number;
   edgeRoundingPricePerM?: number;
   edgeRoundingMeters?: number[];
+  pausePrice?: number;
+  levierPrice?: number;
+  customerPhone?: string;
   pieces: OrderPiece[];
 };
 
@@ -181,26 +184,65 @@ export type DashboardMetrics = {
   monthlyRevenue: Array<{ month: string; revenue: number; target: number }>;
 };
 
-export type FinanceOverview = {
-  revenueTotal: number;
-  materialCost: number;
-  netProfit: number;
-  profitMargin: string;
-  monthlyFlow: Array<{ month: string; revenue: number; expenses: number }>;
-  expenseSummary: Array<{
-    label: string;
-    amount: number;
-    width: string;
-    color: string;
-  }>;
-  salaryRows: Array<{
-    id: string;
-    name: string;
-    role: string;
-    salary: number;
-    status: string;
-  }>;
+export type FinanceSale = {
+  id: string;
+  orderNumber: string;
+  customer: string;
+  kind: string;
+  orderDate: string;
+  total: number;
+  paid: number;
+  remaining: number;
+  status: string;
 };
+
+export type FinancePurchase = {
+  id: string;
+  purchasedAt: string;
+  kind: string;
+  supplier: string;
+  dimensions: string;
+  sliceCount: number;
+  areaSqm: number;
+  amount: number;
+};
+
+export type FinanceCharge = {
+  id: string;
+  title: string;
+  category: string;
+  amount: number;
+  chargeDate: string;
+  note: string;
+  recordedBy: string;
+};
+
+export type SalaryEntry = {
+  id: string;
+  staffId: string;
+  month: string;
+  amount: number;
+  paid: boolean;
+  note: string;
+};
+
+export type FinanceLedger = {
+  sales: FinanceSale[];
+  purchases: FinancePurchase[];
+  charges: FinanceCharge[];
+  staff: StaffMember[];
+  salaries: SalaryEntry[];
+};
+
+let financeCode = '';
+
+export function setFinanceCode(code: string) {
+  financeCode = code;
+}
+
+function financeHeaders(): HeadersInit {
+  return financeCode ? { 'X-Finance-Code': financeCode } : {};
+}
 
 function queryString(params: Record<string, string | number | undefined>) {
   const q = new URLSearchParams();
@@ -233,6 +275,8 @@ export const api = {
     lines: OrderCutLine[];
     edgeRoundingPricePerM?: number;
     edgeRoundingMeters?: number[];
+    pausePrice?: number;
+    levierPrice?: number;
   }) =>
     request<Order>('/orders', {
       method: 'POST',
@@ -345,5 +389,42 @@ export const api = {
     request<void>(`/staff/${id}`, { method: 'DELETE' }),
   getDashboardMetrics: () =>
     request<DashboardMetrics>('/dashboard/metrics'),
-  getFinanceOverview: () => request<FinanceOverview>('/finance/overview'),
+  unlockFinance: (code: string) =>
+    request<{ ok: true }>('/finance/unlock', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+  getFinanceLedger: () =>
+    request<FinanceLedger>('/finance/ledger', { headers: financeHeaders() }),
+  createCharge: (body: {
+    title: string;
+    category: string;
+    amount: number;
+    chargeDate: string;
+    note?: string;
+  }) =>
+    request<FinanceCharge>('/finance/charges', {
+      method: 'POST',
+      headers: financeHeaders(),
+      body: JSON.stringify(body),
+    }),
+  updateCharge: (
+    id: string,
+    body: { title: string; category: string; amount: number; chargeDate: string; note?: string },
+  ) =>
+    request<FinanceCharge>(`/finance/charges/${id}`, {
+      method: 'PATCH',
+      headers: financeHeaders(),
+      body: JSON.stringify(body),
+    }),
+  deleteCharge: (id: string) =>
+    request<void>(`/finance/charges/${id}`, { method: 'DELETE', headers: financeHeaders() }),
+  saveSalary: (body: { staffId: string; month: string; amount: number; paid: boolean; note?: string }) =>
+    request<SalaryEntry>('/finance/salaries', {
+      method: 'PUT',
+      headers: financeHeaders(),
+      body: JSON.stringify(body),
+    }),
+  deleteSalary: (id: string) =>
+    request<void>(`/finance/salaries/${id}`, { method: 'DELETE', headers: financeHeaders() }),
 };

@@ -26,17 +26,19 @@ import {
   orderUsesInventorySlice,
 } from '@/lib/api';
 import { statusLabelFr, statusStyle } from '@/lib/order-status';
-import { formatAreaSqm, formatCurrency, formatNumber } from '@/lib/format';
+import { formatCurrency } from '@/lib/format';
+import { formatReceiptSurface, pieceAmount, pieceUnitPrice } from '@/lib/receipt-format';
 import { formatEdgeRoundingSummary } from '@/lib/edge-rounding';
 import { InventoryKindDetail, InventoryList } from '@/pages/inventory-page';
+import { FinanceBoard } from '@/pages/finance-page';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import {
   AlertCircle, ArrowUpLeft, Banknote, Bell, Boxes,
-  Check, CheckCircle2, ChevronDown, CircleDollarSign, CircleHelp,
-  ClipboardList, CreditCard, Download, FileSpreadsheet, LayoutDashboard,
-  Menu, MoveDownRight, MoveUpRight, Package, Pencil, Plus, Printer, ReceiptText,
-  Search, Settings2, SlidersHorizontal, Trash2, TrendingUp, UserPlus, Users,
+  Check, CheckCircle2, ChevronDown, CircleHelp,
+  CalendarDays, ClipboardList, Download, FileSpreadsheet, LayoutDashboard,
+  Menu, Package, Pencil, Plus, Printer, ReceiptText,
+  Search, Settings2, SlidersHorizontal, Trash2, UserPlus, Users,
   WalletCards, X,
 } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useParams, Router as WouterRouter } from 'wouter';
@@ -83,11 +85,14 @@ const copy = {
     teamSettings: 'إعدادات الفريق', manageStaff: 'إدارة حسابات الموظفين وصلاحياتهم', addStaff: 'إضافة موظف',
     staffAccounts: 'حسابات الموظفين', accountsInTeam: 'حسابات ضمن الفريق', role: 'الدور', email: 'البريد الإلكتروني',
     active: 'نشط', suspended: 'موقوف', action: 'إجراء', ownerPermissions: 'صلاحيات المالك',
-    permissionsText: 'حسابات الموظفين يمكنها إدارة الطلبات والمخزون. تبقى التقارير المالية وإعدادات الفريق متاحة للمالك فقط.',
+    permissionsText: 'صفحة المالية تطلب رمزاً قبل الدخول. بقية الصفحات متاحة لمن يستخدم البرنامج.',
     newStaff: 'إضافة موظف جديد', editStaff: 'تعديل حساب الموظف', fullName: 'الاسم الكامل', jobTitle: 'المسمى الوظيفي',
     rolePlaceholder: 'الدور في المصنع', saveChanges: 'حفظ التغييرات', addAccount: 'إضافة الحساب', exportReport: 'تصدير التقرير',
     receiptReady: 'تم تجهيز الإيصال للطباعة', exportSuccess: 'تم تصدير ملف Excel بنجاح',     depositSuccess: 'تم تسجيل الدفعة وتحديث الرصيد',
     edgeRounding: 'تشطيب الحواف', slicesSubtotal: 'مجموع القطع',
+    customerPhone: 'الهاتف', surface: 'المساحة', pricePerSqm: 'سعر المتر',
+    dateFilterAll: 'كل التواريخ', dateFilterDay: 'يوم واحد', dateFilterPeriod: 'فترة',
+    dateFrom: 'من', dateTo: 'إلى',
     receiptHeaderSettings: 'رأس الإيصال',
     refundCustomer: 'استرداد للعميل',
     newRefund: 'تسجيل استرداد',
@@ -133,11 +138,14 @@ const copy = {
     teamSettings: 'Paramètres de l’équipe', manageStaff: 'Gérer les comptes et les droits du personnel', addStaff: 'Ajouter un membre',
     staffAccounts: 'Comptes du personnel', accountsInTeam: 'comptes dans l’équipe', role: 'Rôle', email: 'E-mail',
     active: 'Actif', suspended: 'Suspendu', action: 'Action', ownerPermissions: 'Droits du propriétaire',
-    permissionsText: 'Le personnel peut gérer les commandes et le stock. Les rapports financiers et les paramètres d’équipe restent réservés au propriétaire.',
+    permissionsText: 'La page Finance demande un code. Le reste des pages reste accessible à la personne qui utilise le programme.',
     newStaff: 'Ajouter un membre', editStaff: 'Modifier le compte', fullName: 'Nom complet', jobTitle: 'Intitulé du poste',
     rolePlaceholder: 'Rôle dans l’atelier', saveChanges: 'Enregistrer les modifications', addAccount: 'Ajouter le compte', exportReport: 'Exporter le rapport',
     receiptReady: 'Le reçu est prêt à être imprimé', exportSuccess: 'Le fichier Excel a été exporté', depositSuccess: 'Paiement enregistré, solde mis à jour',
     edgeRounding: 'Finition des chants', slicesSubtotal: 'Sous-total pièces',
+    customerPhone: 'Téléphone', surface: 'Surface', pricePerSqm: 'Prix / m²',
+    dateFilterAll: 'Toutes les dates', dateFilterDay: 'Un jour', dateFilterPeriod: 'Période',
+    dateFrom: 'Du', dateTo: 'Au',
     receiptHeaderSettings: 'En-tête du reçu',
     refundCustomer: 'Rembourser le client',
     newRefund: 'Enregistrer un remboursement',
@@ -148,8 +156,14 @@ const copy = {
   },
 };
 
-function pieceLineTotal(row: { qty: number; price: number; lineTotal?: number }) {
-  return row.lineTotal && row.lineTotal > 0 ? row.lineTotal : row.qty * row.price;
+function calendarDayKey(value: string | Date | undefined): string {
+  if (!value) return '';
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function DataStatus({ loading, error }: { loading: boolean; error: Error | null }) {
@@ -245,10 +259,6 @@ function Button({ children, onClick, variant = 'dark', icon, testId }: { childre
 function SearchBox({ value, onChange, placeholder = 'بحث في السجلات...', testId = 'input-search' }: { value: string; onChange: (s: string) => void; placeholder?: string; testId?: string }) {
   return <div className="relative"><Search size={16} className="absolute start-3 top-1/2 -translate-y-1/2 text-[#9CA3A8]" /><input data-testid={testId} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className="h-10 w-full rounded-[8px] border border-[#E7E5E0] bg-white ps-9 pe-3 text-xs outline-none transition placeholder:text-[#A9AEB1] focus:border-[#B6a990] focus:ring-2 focus:ring-[#CFC3AE]/30" /></div>;
 }
-function MetricCard({ label, value, change, icon: Icon, negative = false }: { label: string; value: string; change: string; icon: typeof TrendingUp; negative?: boolean }) {
-  return <div className="soft-shadow card-line rounded-[11px] bg-white p-5"><div className="mb-5 flex items-start justify-between"><div className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-[#F1EEE8] text-[#6B6255]"><Icon size={17} strokeWidth={1.8} /></div><span className={`flex items-center gap-1 text-[10px] font-bold ${negative ? 'text-[#D95C55]' : 'text-[#2E9B68]'}`}>{negative ? <MoveDownRight size={12} /> : <MoveUpRight size={12} />}{change}</span></div><p className="mb-1 text-[11px] text-[#5F6B76]">{label}</p><p className="display text-[23px] font-extrabold tracking-[-.05em] text-[#17212B]">{value}</p></div>;
-}
-
 function Dashboard({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
   const t = copy[lang];
   const { staff: activeStaff } = useActiveStaff();
@@ -261,8 +271,7 @@ function Dashboard({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }
   const maxRev = Math.max(...chartMonths.map(m => m.revenue), 1);
   return <AppShell lang={lang} setLang={setLang}><PageIntro eyebrow={t.overview} title={lang === 'ar' ? `صباح الخير، ${greetName}` : `Bonjour, ${greetName}`} description={lang === 'ar' ? 'هذه لمحة هادئة عن حركة المصنع اليوم.' : 'Un aperçu précis de l’activité de l’atelier.'} action={<div className="flex gap-2"><Button testId="button-dashboard-order" onClick={() => setLocation('/orders')} variant="dark" icon={<Plus size={15} />}>{t.newOrder}</Button><Button testId="button-dashboard-product" onClick={() => setLocation('/inventory')} variant="outline" icon={<Package size={15} />}>{t.addProduct}</Button></div>} />
     <DataStatus loading={isLoading} error={error} />
-    {data && <><section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label={`${t.revenue} · ${t.month}`} value={formatCurrency(data.monthRevenue, lang)} change="—" icon={CircleDollarSign} /><MetricCard label={`${t.volume} · ${t.month}`} value={lang === 'ar' ? `${data.monthOrderCount} طلباً` : `${data.monthOrderCount} commandes`} change="—" icon={ClipboardList} /><MetricCard label={t.due} value={formatCurrency(data.totalDue, lang)} change="—" icon={CreditCard} negative /><MetricCard label={t.available} value={formatAreaSqm(data.availableInventorySqm)} change="—" icon={Boxes} /></section>
-    <div className="mt-5 grid gap-5 xl:grid-cols-[1.45fr_1fr]">
+    {data && <><div className="grid gap-5 xl:grid-cols-[1.45fr_1fr]">
        <section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-7 flex items-start justify-between"><div><h2 className="text-sm font-bold">{t.revenue}</h2><p className="mt-1 text-[11px] text-[#5F6B76]">{t.lastSixMonths}</p></div><button data-testid="button-period-filter" className="flex items-center gap-2 rounded-md border border-[#E7E5E0] px-2.5 py-1.5 text-[10px] text-[#5F6B76]">{t.lastSixMonths} <ChevronDown size={13} /></button></div><div className="flex h-[210px] items-end gap-2 border-b border-[#E7E5E0] px-2 sm:gap-5">{chartMonths.map((m) => { const h = Math.max(Math.round((m.revenue / maxRev) * 88), 4); return <div key={m.month} className="group flex flex-1 flex-col items-center gap-2"><div className="relative w-full max-w-[58px] rounded-t-[5px] bg-[#E5DED2] transition group-hover:bg-[#CFC3AE]" style={{ height: `${h * 1.65}px` }}><div className="absolute inset-x-0 bottom-0 rounded-t-[5px] bg-[#3A3D3F]" style={{ height: `${Math.max(h * .66, 2)}%` }} /></div><span className="text-[10px] text-[#8B949A]">{m.month}</span></div>; })}</div><div className="mt-4 flex items-center justify-center gap-5 text-[10px] text-[#5F6B76]"><span className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-sm bg-[#3A3D3F]" />{t.netSales}</span><span className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-sm bg-[#E5DED2]" />{t.target}</span></div></section>
        <section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-6 flex items-center justify-between"><div><h2 className="text-sm font-bold">{t.topMarble}</h2><p className="mt-1 text-[11px] text-[#5F6B76]">{t.bySales}</p></div><button data-testid="button-marble-filter" className="text-[#5F6B76]"><SlidersHorizontal size={16} /></button></div><div className="space-y-5">{data.topMarble.map((row, i) => <div key={row.name}><div className="mb-2 flex justify-between text-[11px]"><span className="font-medium">{row.name}</span><span className="mono text-[#5F6B76]">{row.pct}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#F1EEE8]"><div className={`metric-bar h-full rounded-full ${i === 0 ? 'bg-[#3A3D3F]' : 'bg-[#CFC3AE]'}`} style={{ width: `${row.width}%` }} /></div></div>)}</div></section>
     </div>
@@ -292,14 +301,26 @@ function Orders({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
   const [modal, setModal] = useState(false);
   const [customersOpen, setCustomersOpen] = useState(false);
   const [status, setStatus] = useState<Status | 'الكل'>('الكل');
-  const filtered = orders.filter(
-    (o) =>
-      `${o.orderNumber} ${o.customer} ${o.kind}`
-        .toLocaleLowerCase()
-        .includes(search.toLocaleLowerCase()) &&
-      (status === 'الكل' ||
-        normalizeOrderStatus(o.status) === normalizeOrderStatus(status)),
-  );
+  const [dateMode, setDateMode] = useState<'all' | 'day' | 'period'>('all');
+  const [day, setDay] = useState(() => calendarDayKey(new Date()));
+  const [fromDay, setFromDay] = useState(() => calendarDayKey(new Date()));
+  const [toDay, setToDay] = useState(() => calendarDayKey(new Date()));
+  const filtered = orders.filter((o) => {
+    const matchesText = `${o.orderNumber} ${o.customer} ${o.kind}`
+      .toLocaleLowerCase()
+      .includes(search.toLocaleLowerCase());
+    const matchesStatus =
+      status === 'الكل' ||
+      normalizeOrderStatus(o.status) === normalizeOrderStatus(status);
+    if (!matchesText || !matchesStatus) return false;
+    if (dateMode === 'all') return true;
+    const key = calendarDayKey(o.orderDate);
+    if (!key) return false;
+    if (dateMode === 'day') return key === day;
+    const start = fromDay <= toDay ? fromDay : toDay;
+    const end = fromDay <= toDay ? toDay : fromDay;
+    return key >= start && key <= end;
+  });
   const openCreate = () => setModal(true);
   const statusFilters: Array<Status | 'الكل'> = ['الكل', ...ORDER_STATUSES];
   return (
@@ -326,7 +347,7 @@ function Orders({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
       />
       <DataStatus loading={isLoading} error={error} />
       <div className="soft-shadow card-line overflow-hidden rounded-[11px] bg-white">
-        <div className="flex flex-col gap-3 border-b border-[#E7E5E0] p-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-3 border-b border-[#E7E5E0] p-4">
           <div className="w-full md:max-w-[340px]">
             <SearchBox
               value={search}
@@ -334,6 +355,65 @@ function Orders({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
               placeholder={lang === 'ar' ? 'ابحث برقم الطلب أو العميل...' : 'Rechercher par commande ou client...'}
               testId="input-orders-search"
             />
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex items-center gap-1.5 text-[#9B8C77]">
+              <CalendarDays size={15} />
+            </div>
+            <div className="flex rounded-md bg-[#F1EEE8] p-1">
+              {(
+                [
+                  ['all', t.dateFilterAll],
+                  ['day', t.dateFilterDay],
+                  ['period', t.dateFilterPeriod],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  data-testid={`button-orders-date-${mode}`}
+                  onClick={() => setDateMode(mode)}
+                  className={`whitespace-nowrap rounded px-2.5 py-1.5 text-[10px] font-bold ${
+                    dateMode === mode ? 'bg-white text-[#3A3D3F] shadow-sm' : 'text-[#6E665B]'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {dateMode === 'day' && (
+              <input
+                data-testid="input-orders-day"
+                type="date"
+                value={day}
+                onChange={(e) => setDay(e.target.value)}
+                className="digits-latin h-9 rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+              />
+            )}
+            {dateMode === 'period' && (
+              <>
+                <label className="text-[10px] font-semibold text-[#5F6B76]">
+                  {t.dateFrom}
+                  <input
+                    data-testid="input-orders-from"
+                    type="date"
+                    value={fromDay}
+                    onChange={(e) => setFromDay(e.target.value)}
+                    className="digits-latin ms-1 h-9 rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+                  />
+                </label>
+                <label className="text-[10px] font-semibold text-[#5F6B76]">
+                  {t.dateTo}
+                  <input
+                    data-testid="input-orders-to"
+                    type="date"
+                    value={toDay}
+                    onChange={(e) => setToDay(e.target.value)}
+                    className="digits-latin ms-1 h-9 rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+                  />
+                </label>
+              </>
+            )}
           </div>
           <div className="mobile-scroll flex gap-1.5 pb-1">
             {statusFilters.map((s) => (
@@ -509,7 +589,7 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
   return <AppShell lang={lang} setLang={setLang}><div className="no-print mb-6 flex items-center gap-2 text-[11px] text-[#5F6B76]"><Link href="/orders" data-testid="link-back-orders" className="hover:text-[#3A3D3F]">{t.orders}</Link><span>/</span><span className="font-semibold text-[#3A3D3F]">{order.id}</span></div>
      <OrderReceiptPrint order={order} deposits={deposits} paid={paid} marbleImagesByKind={marbleImagesByKind} />
      <div className="order-screen-content"><PageIntro eyebrow={t.orderDetails} title={order.id} description={`${order.customer} · ${orderDate(order.date, lang)}`} action={<><Button testId="button-receipt-header" onClick={() => setHeaderModal(true)} variant="outline" icon={<Settings2 size={15} />}>{t.receiptHeaderSettings}</Button><Button testId="button-print-receipt" onClick={() => setPrintModal(true)} variant="outline" icon={<Printer size={15} />}>{t.printReceipt}</Button><Button testId="button-export-order" onClick={() => { setNotice(t.exportSuccess); setTimeout(() => setNotice(''), 2800); }} variant="stone" icon={<FileSpreadsheet size={15} />}>{t.exportExcel}</Button><Button testId="button-delete-order-detail" onClick={() => { if (window.confirm(t.confirmDeleteOrder)) deleteMutation.mutate(); }} variant="danger" icon={<Trash2 size={15} />}>{t.deleteOrder}</Button></>} />{notice && <div data-testid="status-order-feedback" className="no-print mb-4 flex items-center gap-2 rounded-lg border border-[#BCE3C9] bg-[#EAF6EF] px-4 py-3 text-xs font-semibold text-[#2E9B68]"><CheckCircle2 size={16} />{notice}</div>}
-     <div className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]"><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-bold">{t.orderData}</h2><div className="flex items-center gap-2 text-[10px] font-semibold text-[#8B949A]"><span>{t.status}</span><OrderStatusPicker testId="select-order-detail-status" value={order.status} lang={lang} disabled={statusMutation.isPending} onChange={(s) => { if (s === 'ملغاة' && normalizeOrderStatus(order.status) !== 'ملغاة' && orderUsesInventorySlice(order)) { statusMutation.reset(); setCancelOpen(true); return; } statusMutation.mutate({ status: s }); }} /></div></div><div className="grid gap-y-5 sm:grid-cols-3">{[[t.customer, order.customer],[t.staffCreator, order.staff],[t.marbleKind, order.kind],[t.dimensions, order.dimensions ?? '—'],[t.thickness, order.thickness ?? '—'],[t.edges, edgesDisplay]].map(([label, value]) => <div key={String(label)}><p className="mb-1 text-[10px] text-[#8B949A]">{label}</p><p className="text-xs font-semibold">{value}</p></div>)}</div></section><section className="soft-shadow card-line overflow-hidden rounded-[11px] bg-white"><div className="flex items-center justify-between border-b border-[#E7E5E0] p-5"><h2 className="text-sm font-bold">{t.orderPiecesLabel}</h2><span className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `${pieceRows.length} قطع` : `${pieceRows.length} pièces`}</span></div><table className="w-full text-xs"><thead className="bg-[#FBFAF8] text-[10px] text-[#8B949A]"><tr><th className="px-5 py-3 text-start font-medium">{t.marbleKind}</th><th className="px-5 py-3 text-start font-medium">{t.dimensions}</th><th className="px-5 py-3 text-start font-medium">{t.quantityShort}</th><th className="px-5 py-3 text-end font-medium">{t.sellingPrice}</th></tr></thead><tbody>{pieceRows.map(row => <tr key={`${row.kind}-${row.dims}-${row.qty}`} className="border-t border-[#F0EEE9]"><td className="px-5 py-3.5 font-semibold">{row.kind}</td><td className="px-5 py-3.5 text-[#5F6B76]">{row.dims}</td><td className="px-5 py-3.5">{row.qty}</td><td className="mono px-5 py-3.5 text-end">{formatCurrency(pieceLineTotal(row), lang)}</td></tr>)}</tbody></table></section></div><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-6 flex items-center justify-between"><h2 className="text-sm font-bold">{t.paymentSummary}</h2><Banknote size={18} className="text-[#9B8C77]" /></div><div className="space-y-3 border-b border-[#E7E5E0] pb-5 text-xs">{(order.linesSubtotal > 0 || order.edgeRoundingPrice > 0) && <><div className="flex justify-between"><span className="text-[#5F6B76]">{t.slicesSubtotal}</span><b>{formatCurrency(order.linesSubtotal ?? order.total, lang)}</b></div>{order.edgeRoundingPrice > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">{t.edgeRounding}</span><b>{formatCurrency(order.edgeRoundingPrice, lang)}</b></div>}</>}<div className="flex justify-between"><span className="text-[#5F6B76]">{t.orderTotal}</span><b>{formatCurrency(order.total, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.paid}</span><b className="text-[#2E9B68]">{formatCurrency(paid, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.remaining}</span><b className="text-[#D95C55]">{formatCurrency(remaining, lang)}</b></div></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-[#F1EEE8]"><div className="h-full rounded-full bg-[#2E9B68] transition-all" style={{ width: `${Math.min(order.total ? (paid / order.total) * 100 : 0, 100)}%` }} /></div><p className="mt-2 text-[10px] text-[#8B949A]">{order.total ? Math.round((paid / order.total) * 100) : 0}% {t.paidPercent}</p><div className="no-print flex flex-wrap gap-2"><Button testId="button-add-deposit" onClick={() => setModal(true)} variant="dark" icon={<Plus size={15} />}>{t.addDeposit}</Button>{isCancelled && paid > 0 && <Button testId="button-refund-order" onClick={() => setRefundModal(true)} variant="outline" icon={<CreditCard size={15} />}>{t.refundCustomer}</Button>}</div></section><section className="soft-shadow card-line rounded-[11px] bg-white p-5"><h2 className="mb-4 text-sm font-bold">{t.depositLog}</h2><div className="space-y-3">{deposits.map(d => { const signed = depositSignedAmount(d); const isRefund = d.depositKind === 'refund'; return <div key={d.id} className="flex items-center gap-3"><div className={`flex h-8 w-8 items-center justify-center rounded-full ${isRefund ? 'bg-[#FBEDEC] text-[#D95C55]' : 'bg-[#EAF6EF] text-[#2E9B68]'}`}><Check size={14} /></div><div className="flex-1"><p className="text-xs font-semibold">{depositMethodLabel(d)}</p><p className="text-[10px] text-[#8B949A]">{orderDate(d.date, lang)}</p></div><b className={`mono text-xs ${isRefund ? 'text-[#D95C55]' : 'text-[#2E9B68]'}`}>{signed >= 0 ? '+' : ''}{formatCurrency(signed, lang)}</b></div>; })}</div></section></div></div>
+     <div className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]"><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-bold">{t.orderData}</h2><div className="flex items-center gap-2 text-[10px] font-semibold text-[#8B949A]"><span>{t.status}</span><OrderStatusPicker testId="select-order-detail-status" value={order.status} lang={lang} disabled={statusMutation.isPending} onChange={(s) => { if (s === 'ملغاة' && normalizeOrderStatus(order.status) !== 'ملغاة' && orderUsesInventorySlice(order)) { statusMutation.reset(); setCancelOpen(true); return; } statusMutation.mutate({ status: s }); }} /></div></div><div className="grid gap-y-5 sm:grid-cols-3">{[[t.customer, order.customer],[t.customerPhone, order.customerPhone || '—'],[t.staffCreator, order.staff],[t.marbleKind, order.kind],[t.dimensions, order.dimensions ?? '—'],[t.thickness, order.thickness ?? '—'],[t.edges, edgesDisplay]].map(([label, value]) => <div key={String(label)}><p className="mb-1 text-[10px] text-[#8B949A]">{label}</p><p className="text-xs font-semibold">{value}</p></div>)}</div></section><section className="soft-shadow card-line overflow-x-auto rounded-[11px] bg-white"><div className="flex items-center justify-between border-b border-[#E7E5E0] p-5"><h2 className="text-sm font-bold">{t.orderPiecesLabel}</h2><span className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `${pieceRows.length} قطع` : `${pieceRows.length} pièces`}</span></div><table className="w-full min-w-[760px] text-xs"><thead className="bg-[#FBFAF8] text-[10px] text-[#8B949A]"><tr><th className="px-5 py-3 text-start font-medium">{t.marbleKind}</th><th className="px-5 py-3 text-start font-medium">{t.dimensions}</th><th className="px-5 py-3 text-start font-medium">{t.surface}</th><th className="px-5 py-3 text-end font-medium">{t.pricePerSqm}</th><th className="px-5 py-3 text-start font-medium">{t.quantityShort}</th><th className="px-5 py-3 text-end font-medium">{t.sellingPrice}</th></tr></thead><tbody>{pieceRows.map((row, i) => <tr key={`${i}-${row.kind}-${row.dims}`} className="border-t border-[#F0EEE9]"><td className="px-5 py-3.5 font-semibold">{row.kind}</td><td className="px-5 py-3.5 text-[#5F6B76]">{row.dims}</td><td className="digits-latin px-5 py-3.5">{formatReceiptSurface(row)}</td><td className="mono digits-latin px-5 py-3.5 text-end">{formatCurrency(pieceUnitPrice(row), lang)}</td><td className="px-5 py-3.5">{row.qty}</td><td className="mono px-5 py-3.5 text-end">{formatCurrency(pieceAmount(row), lang)}</td></tr>)}</tbody></table></section></div><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-6 flex items-center justify-between"><h2 className="text-sm font-bold">{t.paymentSummary}</h2><Banknote size={18} className="text-[#9B8C77]" /></div><div className="space-y-3 border-b border-[#E7E5E0] pb-5 text-xs">{(order.linesSubtotal > 0 || order.edgeRoundingPrice > 0 || (order.pausePrice ?? 0) > 0 || (order.levierPrice ?? 0) > 0) && <><div className="flex justify-between"><span className="text-[#5F6B76]">{t.slicesSubtotal}</span><b>{formatCurrency(order.linesSubtotal ?? order.total, lang)}</b></div>{order.edgeRoundingPrice > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">{t.edgeRounding}</span><b>{formatCurrency(order.edgeRoundingPrice, lang)}</b></div>}{(order.pausePrice ?? 0) > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">la pause</span><b>{formatCurrency(order.pausePrice ?? 0, lang)}</b></div>}{(order.levierPrice ?? 0) > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">le levier</span><b>{formatCurrency(order.levierPrice ?? 0, lang)}</b></div>}</>}<div className="flex justify-between"><span className="text-[#5F6B76]">{t.orderTotal}</span><b>{formatCurrency(order.total, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.paid}</span><b className="text-[#2E9B68]">{formatCurrency(paid, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.remaining}</span><b className="text-[#D95C55]">{formatCurrency(remaining, lang)}</b></div></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-[#F1EEE8]"><div className="h-full rounded-full bg-[#2E9B68] transition-all" style={{ width: `${Math.min(order.total ? (paid / order.total) * 100 : 0, 100)}%` }} /></div><p className="mt-2 text-[10px] text-[#8B949A]">{order.total ? Math.round((paid / order.total) * 100) : 0}% {t.paidPercent}</p><div className="no-print flex flex-wrap gap-2"><Button testId="button-add-deposit" onClick={() => setModal(true)} variant="dark" icon={<Plus size={15} />}>{t.addDeposit}</Button>{isCancelled && paid > 0 && <Button testId="button-refund-order" onClick={() => setRefundModal(true)} variant="outline" icon={<CreditCard size={15} />}>{t.refundCustomer}</Button>}</div></section><section className="soft-shadow card-line rounded-[11px] bg-white p-5"><h2 className="mb-4 text-sm font-bold">{t.depositLog}</h2><div className="space-y-3">{deposits.map(d => { const signed = depositSignedAmount(d); const isRefund = d.depositKind === 'refund'; return <div key={d.id} className="flex items-center gap-3"><div className={`flex h-8 w-8 items-center justify-center rounded-full ${isRefund ? 'bg-[#FBEDEC] text-[#D95C55]' : 'bg-[#EAF6EF] text-[#2E9B68]'}`}><Check size={14} /></div><div className="flex-1"><p className="text-xs font-semibold">{depositMethodLabel(d)}</p><p className="text-[10px] text-[#8B949A]">{orderDate(d.date, lang)}</p></div><b className={`mono text-xs ${isRefund ? 'text-[#D95C55]' : 'text-[#2E9B68]'}`}>{signed >= 0 ? '+' : ''}{formatCurrency(signed, lang)}</b></div>; })}</div></section></div></div>
      {modal && <Modal title={t.newDeposit} onClose={() => setModal(false)}><form onSubmit={addDeposit} className="space-y-4"><Field label={t.depositAmount} name="amount" type="number" placeholder="0" required /><label className="block text-xs font-semibold">{t.paymentMethod}<select name="method" className="mt-1.5 h-10 w-full rounded-lg border border-[#E7E5E0] bg-white px-3 text-xs outline-none focus:border-[#CFC3AE]"><option value="تحويل بنكي">{t.bankTransfer}</option><option value="نقدي">{t.cash}</option><option value="بطاقة">{t.card}</option></select></label><div className="flex justify-end gap-2 pt-2"><Button testId="button-cancel-deposit" onClick={() => setModal(false)} variant="outline">{t.cancel}</Button><Button testId="button-submit-deposit" variant="dark">{t.saveDeposit}</Button></div></form></Modal>}
      {refundModal && <Modal title={t.newRefund} onClose={() => setRefundModal(false)}><form onSubmit={addRefund} className="space-y-4"><Field label={t.refundAmount} name="amount" type="number" placeholder="0" required /><p className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `الحد الأقصى: ${formatCurrency(paid, lang)}` : `Maximum : ${formatCurrency(paid, lang)}`}</p><div className="flex justify-end gap-2 pt-2"><Button testId="button-cancel-refund" onClick={() => setRefundModal(false)} variant="outline">{t.cancel}</Button><Button testId="button-submit-refund" variant="dark">{t.saveRefund}</Button></div></form></Modal>}</div>
      {headerModal && <ReceiptHeaderSettingsModal lang={lang} lines={receiptLines} onChange={setReceiptLines} onClose={() => setHeaderModal(false)} />}
@@ -532,16 +612,11 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
 }
 
 function Finance({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
-  const t = copy[lang];
-  const { data, isLoading, error } = useQuery({ queryKey: ['finance'], queryFn: api.getFinanceOverview });
-  const expenseLabels: Record<string, string> = {
-    rawMaterials: t.rawMaterials,
-    salaries: t.salaries,
-    transport: t.transport,
-    other: t.other,
-  };
-  const maxFlow = Math.max(...(data?.monthlyFlow.map(f => Math.max(f.revenue, f.expenses)) ?? [1]), 1);
-  return <AppShell lang={lang} setLang={setLang}><PageIntro eyebrow={t.financialReports} title={t.finance} description={lang === 'ar' ? 'بيانات محدثة من قاعدة البيانات' : 'Données synchronisées depuis la base'} action={<Button testId="button-export-finance" onClick={() => alert(lang === 'ar' ? 'تم تجهيز التقرير' : 'Rapport préparé')} variant="outline" icon={<Download size={15} />}>{t.exportReport}</Button>} /><DataStatus loading={isLoading} error={error} />{data && <><section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label={t.revenueTotal} value={formatCurrency(data.revenueTotal, lang)} change="—" icon={TrendingUp} /><MetricCard label={t.materialCost} value={formatCurrency(data.materialCost, lang)} change="—" icon={Boxes} negative /><MetricCard label={t.netProfit} value={formatCurrency(data.netProfit, lang)} change="—" icon={CircleDollarSign} /><MetricCard label={t.profitMargin} value={data.profitMargin} change="—" icon={MoveUpRight} /></section><div className="mt-5 grid gap-5 xl:grid-cols-[1.2fr_.8fr]"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-7"><h2 className="text-sm font-bold">{t.revenueExpenses}</h2><p className="mt-1 text-[11px] text-[#5F6B76]">{t.monthlyComparison}</p></div><div className="flex h-[245px] items-end gap-3 border-b border-[#E7E5E0] px-2 sm:gap-7">{data.monthlyFlow.map((m) => <div key={m.month} className="flex flex-1 items-end justify-center gap-1.5"><div className="w-[45%] rounded-t bg-[#3A3D3F]" style={{ height: `${Math.max((m.revenue / maxFlow) * 180, 4)}px` }} /><div className="w-[45%] rounded-t bg-[#CFC3AE]" style={{ height: `${Math.max((m.expenses / maxFlow) * 180, 4)}px` }} /><span className="absolute translate-y-5 text-[10px] text-[#8B949A]">{m.month}</span></div>)}</div><div className="mt-7 flex justify-center gap-5 text-[10px] text-[#5F6B76]"><span className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-sm bg-[#3A3D3F]" />{t.revenue}</span><span className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-sm bg-[#CFC3AE]" />{lang === 'ar' ? 'المصروفات' : 'Dépenses'}</span></div></section><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><h2 className="mb-6 text-sm font-bold">{t.expenseSummary}</h2><div className="space-y-5">{data.expenseSummary.map(x => <div key={x.label}><div className="mb-2 flex justify-between text-[11px]"><span>{expenseLabels[x.label] ?? x.label}</span><span className="mono text-[#5F6B76]">{formatCurrency(x.amount, lang)}</span></div><div className="h-2 rounded-full bg-[#F1EEE8]"><div className="h-full rounded-full" style={{ width: x.width, background: x.color }} /></div></div>)}</div></section></div><section className="soft-shadow card-line mt-5 overflow-hidden rounded-[11px] bg-white"><div className="flex items-center justify-between border-b border-[#E7E5E0] p-5"><div><h2 className="text-sm font-bold">{t.salaries}</h2><p className="mt-1 text-[11px] text-[#5F6B76]">{t.salaryCycle}</p></div><Button testId="button-pay-salaries" onClick={() => alert(lang === 'ar' ? 'تم تحديد الرواتب للدفع' : 'Salaires marqués pour paiement')} variant="stone" icon={<Banknote size={15} />}>{t.markForPayment}</Button></div><div className="overflow-x-auto"><table className="w-full min-w-[640px] text-xs"><thead className="bg-[#FBFAF8] text-[10px] text-[#8B949A]"><tr><th className="px-5 py-3 text-start font-medium">{t.staff}</th><th className="px-5 py-3 text-start font-medium">{t.jobTitle}</th><th className="px-5 py-3 text-start font-medium">{lang === 'ar' ? 'الراتب' : 'Salaire'}</th><th className="px-5 py-3 text-start font-medium">{t.status}</th><th className="px-5 py-3 text-end font-medium">{t.action}</th></tr></thead><tbody>{data.salaryRows.map((x, i) => <tr key={x.id} className="border-t border-[#F0EEE9]"><td className="px-5 py-4 font-semibold"><span className="me-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#F1EEE8] text-[10px]">{x.name[0]}</span>{x.name}</td><td className="px-5 py-4 text-[#5F6B76]">{x.role}</td><td className="mono px-5 py-4">{formatCurrency(x.salary, lang)}</td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${x.status === 'تم الدفع' ? 'bg-[#EAF6EF] text-[#2E9B68]' : 'bg-[#FCF4E5] text-[#D99A32]'}`}>{x.status === 'تم الدفع' ? t.paidStatus : t.dueStatus}</span></td><td className="px-5 py-4 text-end"><button data-testid={`button-salary-${i}`} className="text-[11px] font-semibold text-[#9B8C77] hover:text-[#3A3D3F]">{x.status === 'مستحق' ? t.recordPayment : t.viewReceipt}</button></td></tr>)}</tbody></table></div></section></>}</AppShell>;
+  return (
+    <AppShell lang={lang} setLang={setLang}>
+      <FinanceBoard lang={lang} />
+    </AppShell>
+  );
 }
 
 function Settings({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
@@ -588,6 +663,23 @@ function Router({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
 function NotFound() { return <div className="flex min-h-dvh items-center justify-center bg-[#F8F8F6]"><div className="text-center"><p className="mono text-5xl font-bold text-[#CFC3AE]">404</p><h1 className="mt-3 text-xl font-bold">الصفحة غير موجودة</h1><Link href="/" data-testid="link-not-found-home" className="mt-5 inline-block text-sm text-[#9B8C77]">العودة للرئيسية</Link></div></div>; }
 function App() {
   const [lang, setLang] = useState<Lang>('ar');
+  useEffect(() => {
+    const blankTitle = () => {
+      document.documentElement.dataset.printTitle = document.title;
+      document.title = ' ';
+    };
+    const restoreTitle = () => {
+      const previous = document.documentElement.dataset.printTitle;
+      if (previous) document.title = previous;
+      delete document.documentElement.dataset.printTitle;
+    };
+    window.addEventListener('beforeprint', blankTitle);
+    window.addEventListener('afterprint', restoreTitle);
+    return () => {
+      window.removeEventListener('beforeprint', blankTitle);
+      window.removeEventListener('afterprint', restoreTitle);
+    };
+  }, []);
   return (
     <QueryClientProvider client={queryClient}>
       <ActiveStaffProvider>
