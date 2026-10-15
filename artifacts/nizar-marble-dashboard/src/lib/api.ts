@@ -15,6 +15,17 @@ export function setUnauthorizedHandler(handler: () => void) {
   onUnauthorized = handler;
 }
 
+async function errorMessage(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return body.error ?? res.statusText;
+}
+
+function rejectSession(path: string, status: number, error: string) {
+  if (status === 401 && error === 'unauthorized' && path !== '/auth/login') {
+    onUnauthorized?.();
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -25,10 +36,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers ?? {}),
     },
   });
-  if (res.status === 401 && path !== '/auth/login') onUnauthorized?.();
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? res.statusText);
+    const error = await errorMessage(res);
+    rejectSession(path, res.status, error);
+    throw new Error(error);
   }
   if (res.status === 204) {
     return undefined as T;
@@ -317,10 +328,10 @@ export const api = {
       headers: staffActorHeaders(),
       body: form,
     });
-    if (res.status === 401) onUnauthorized?.();
     if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(body.error ?? res.statusText);
+      const error = await errorMessage(res);
+      rejectSession(`/orders/${orderNumber}/papers`, res.status, error);
+      throw new Error(error);
     }
     return res.json() as Promise<Order>;
   },
