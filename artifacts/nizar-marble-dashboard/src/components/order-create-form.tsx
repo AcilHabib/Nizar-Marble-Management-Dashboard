@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, Minus, Plus, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -12,6 +12,17 @@ import { formatCurrency, formatNumber } from '@/lib/format';
 import { computeEdgeRoundingTotal } from '@/lib/edge-rounding';
 
 type Lang = 'ar' | 'fr';
+type EdgeKind = 'linear' | '45';
+type EdgeDraft = { kind: '' | EdgeKind; meters: number };
+
+function isPaperFile(file: File) {
+  if (file.type.startsWith('image/') || file.type === 'application/pdf') return true;
+  return /\.(jpe?g|png|webp|gif|heic|heif|pdf)$/i.test(file.name);
+}
+
+function paperKey(file: File) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
 
 const labels = {
   ar: {
@@ -46,12 +57,27 @@ const labels = {
       'لا توجد شرائح كاملة كافية. كل قطعة تستهلك شريحة كاملة.',
     edgeRounding: 'تشطيب الحواف',
     pricePerMeter: 'سعر المتر (د.ج)',
+    edgeType: 'نوع الحافة',
+    edgeLinear: 'خطي',
+    edge45: '45 درجة',
+    edgeTypeHint: 'اختر نوع الحافة قبل إدخال الطول.',
     lengthMeters: 'الطول (م)',
     addLength: 'إضافة طول',
     edgeRoundingTotal: 'مجموع تشطيب الحواف',
+    needEdgeType: 'اختر نوع الحافة: خطي أو 45 درجة',
+    needEdgeLength: 'أدخل طول الحافة',
     feeAmount: 'المبلغ (د.ج)',
     slicesSubtotal: 'مجموع القطع',
     orderTotal: 'إجمالي الطلب',
+    keepPrice: 'السعر المحسوب',
+    roundPrice: 'سعر مدوّر',
+    roundAmount: 'المبلغ المدوّر (د.ج)',
+    needRounded: 'أدخل السعر المدوّر',
+    dimensionPaper: 'ورقة المقاسات',
+    paperHint: 'صورة أو PDF للورقة التي كتب عليها الزبون المقاسات.',
+    choosePaper: 'اختيار ملف',
+    paperType: 'يُقبل الصور وملفات PDF فقط.',
+    paperFailed: 'تم حفظ الطلب، وتعذر حفظ ورقة المقاسات. أعد المحاولة.',
     cancel: 'إلغاء',
     save: 'حفظ الطلب',
     selectCustomer: 'اختر عميلاً',
@@ -59,6 +85,8 @@ const labels = {
     selectSlice: 'اختر شريحة',
     noSlices: 'لا توجد شرائح متاحة. يمكنك إنشاء القطعة بدون شريحة.',
     needThickness: 'أدخل سماكة القطعة',
+    needSize: 'أدخل الطول والعرض لكل قطعة',
+    enterHint: 'Enter ينقل المؤشر: السماكة، ثم الطول، ثم العرض، ثم قطعة جديدة بنفس السماكة.',
   },
   fr: {
     customer: 'Client',
@@ -92,12 +120,27 @@ const labels = {
       'Pas assez de dalles entières. Chaque pièce consomme une dalle complète.',
     edgeRounding: 'Finition des chants',
     pricePerMeter: 'Prix au mètre (DA)',
+    edgeType: 'Type de chant',
+    edgeLinear: 'Linéaire',
+    edge45: '45 degrés',
+    edgeTypeHint: 'Choisissez le type de chant avant d’entrer la longueur.',
     lengthMeters: 'Longueur (m)',
     addLength: 'Ajouter une longueur',
     edgeRoundingTotal: 'Total finition chants',
+    needEdgeType: 'Choisissez le type de chant : linéaire ou 45 degrés',
+    needEdgeLength: 'Indiquez la longueur du chant',
     feeAmount: 'Montant (DA)',
     slicesSubtotal: 'Sous-total pièces',
     orderTotal: 'Total commande',
+    keepPrice: 'Prix calculé',
+    roundPrice: 'Prix arrondi',
+    roundAmount: 'Montant arrondi (DA)',
+    needRounded: 'Indiquez le prix arrondi',
+    dimensionPaper: 'Feuille des mesures',
+    paperHint: 'Photo ou PDF de la feuille où le client a noté les dimensions.',
+    choosePaper: 'Choisir un fichier',
+    paperType: 'Images et PDF uniquement.',
+    paperFailed: 'La commande est enregistrée, mais la feuille n’a pas pu être enregistrée. Réessayez.',
     cancel: 'Annuler',
     save: 'Enregistrer',
     selectCustomer: 'Choisir un client',
@@ -105,34 +148,63 @@ const labels = {
     selectSlice: 'Choisir la dalle',
     noSlices: 'Aucune dalle disponible. Vous pouvez créer la pièce sans dalle.',
     needThickness: 'Indiquez l’épaisseur',
+    needSize: 'Indiquez la longueur et la largeur de chaque pièce',
+    enterHint: 'Entrée avance : épaisseur, longueur, largeur, puis une nouvelle pièce de la même épaisseur.',
   },
 };
 
-type DraftLine = {
+type SizeDraft = {
+  key: string;
+  cutLengthM: number | '';
+  cutWidthM: number | '';
+  qty: number;
+};
+
+type DraftGroup = {
+  key: string;
   kindId: string;
   useSlice: boolean;
   sliceId: string;
-  cutLengthM: number;
-  cutWidthM: number;
-  thicknessM: number;
-  qty: number;
+  thicknessM: number | '';
   specialPrice: boolean;
-  unitPrice: number;
+  unitPrice: number | '';
   unitPriceTouched: boolean;
+  sizes: SizeDraft[];
 };
 
-const emptyLine = (): DraftLine => ({
+let draftKey = 0;
+function nextKey() {
+  draftKey += 1;
+  return `d${draftKey}`;
+}
+
+function emptySize(): SizeDraft {
+  return { key: nextKey(), cutLengthM: '', cutWidthM: '', qty: 1 };
+}
+
+const emptyGroup = (): DraftGroup => ({
+  key: nextKey(),
   kindId: '',
-  useSlice: true,
+  useSlice: false,
   sliceId: '',
-  cutLengthM: 0.5,
-  cutWidthM: 0.5,
-  thicknessM: 0.02,
-  qty: 1,
-  specialPrice: false,
-  unitPrice: 0,
+  thicknessM: '',
+  specialPrice: true,
+  unitPrice: '',
   unitPriceTouched: false,
+  sizes: [emptySize()],
 });
+
+function asNumber(value: number | '') {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function sizeComplete(size: SizeDraft) {
+  return asNumber(size.cutLengthM) > 0 && asNumber(size.cutWidthM) > 0;
+}
+
+function sizeBlank(size: SizeDraft) {
+  return size.cutLengthM === '' && size.cutWidthM === '';
+}
 
 function Modal({
   title,
@@ -186,8 +258,8 @@ function QuantityStepper({
   );
 }
 
-function lineArea(line: DraftLine) {
-  return line.cutLengthM * line.cutWidthM * line.qty;
+function sizeArea(size: SizeDraft) {
+  return asNumber(size.cutLengthM) * asNumber(size.cutWidthM) * size.qty;
 }
 
 function availableSlices(slice: MarbleSlice) {
@@ -198,32 +270,34 @@ function availableSlices(slice: MarbleSlice) {
   return 0;
 }
 
-function slicesNeeded(lines: DraftLine[], sliceId: string) {
-  return lines.reduce(
-    (sum, line) =>
-      line.useSlice && line.sliceId === sliceId ? sum + line.qty : sum,
-    0,
-  );
+function slicesNeeded(groups: DraftGroup[], sliceId: string) {
+  return groups.reduce((sum, group) => {
+    if (!group.useSlice || group.sliceId !== sliceId) return sum;
+    return sum + group.sizes.reduce((qty, size) => qty + size.qty, 0);
+  }, 0);
 }
 
-function cutFits(line: DraftLine, slice: MarbleSlice) {
+function cutFits(size: SizeDraft, slice: MarbleSlice) {
+  const length = asNumber(size.cutLengthM);
+  const width = asNumber(size.cutWidthM);
   const fitsOrientation =
-    (line.cutLengthM <= slice.lengthM + 1e-6 && line.cutWidthM <= slice.widthM + 1e-6) ||
-    (line.cutLengthM <= slice.widthM + 1e-6 && line.cutWidthM <= slice.lengthM + 1e-6);
-  const pieceArea = line.cutLengthM * line.cutWidthM;
+    (length <= slice.lengthM + 1e-6 && width <= slice.widthM + 1e-6) ||
+    (length <= slice.widthM + 1e-6 && width <= slice.lengthM + 1e-6);
+  const pieceArea = length * width;
   return fitsOrientation && pieceArea <= slice.areaOneSqm + 1e-6;
 }
 
-function unitPriceFor(line: DraftLine, slice?: MarbleSlice) {
-  if (!line.useSlice) return Math.max(0, Math.round(line.unitPrice));
+function unitPriceFor(group: DraftGroup, slice?: MarbleSlice) {
+  if (!group.useSlice) return Math.max(0, Math.round(asNumber(group.unitPrice)));
   if (!slice) return 0;
-  if (line.specialPrice) return Math.max(0, Math.round(line.unitPrice));
+  if (group.specialPrice) return Math.max(0, Math.round(asNumber(group.unitPrice)));
   return slice.sellingPerSqm;
 }
 
-function computeLinePrice(line: DraftLine, slice?: MarbleSlice) {
-  if (line.useSlice && !slice) return 0;
-  return Math.round(lineArea(line) * unitPriceFor(line, slice));
+function computeSizePrice(group: DraftGroup, size: SizeDraft, slice?: MarbleSlice) {
+  if (!sizeComplete(size)) return 0;
+  if (group.useSlice && !slice) return 0;
+  return Math.round(sizeArea(size) * unitPriceFor(group, slice));
 }
 
 export function OrderCreateForm({
@@ -241,11 +315,34 @@ export function OrderCreateForm({
   const qc = useQueryClient();
   const [customerId, setCustomerId] = useState('');
   const [customerModal, setCustomerModal] = useState(false);
-  const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
+  const [groups, setGroups] = useState<DraftGroup[]>([emptyGroup()]);
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
   const [edgePricePerM, setEdgePricePerM] = useState(0);
-  const [edgeMeters, setEdgeMeters] = useState<number[]>([0]);
+  const [edgeRows, setEdgeRows] = useState<EdgeDraft[]>([{ kind: '', meters: 0 }]);
   const [pausePrice, setPausePrice] = useState(0);
   const [levierPrice, setLevierPrice] = useState(0);
+  const [roundPrice, setRoundPrice] = useState(false);
+  const [roundedAmount, setRoundedAmount] = useState<number | ''>('');
+  const [roundedTouched, setRoundedTouched] = useState(false);
+  const [paperFiles, setPaperFiles] = useState<File[]>([]);
+  const [paperError, setPaperError] = useState('');
+  const savedOrderNumber = useRef<string | null>(null);
+  const paperPreviews = useMemo(
+    () =>
+      paperFiles.map((file) => ({
+        key: `${file.name}-${file.size}-${file.lastModified}`,
+        file,
+        url: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
+      })),
+    [paperFiles],
+  );
+  useEffect(() => {
+    return () => {
+      for (const preview of paperPreviews) {
+        if (preview.url) URL.revokeObjectURL(preview.url);
+      }
+    };
+  }, [paperPreviews]);
   const [submitError, setSubmitError] = useState('');
 
   const { data: customers = [] } = useQuery({
@@ -258,7 +355,7 @@ export function OrderCreateForm({
     queryFn: () => api.getMarbleKinds({ visible: 'true' }),
   });
 
-  const kindIds = [...new Set(lines.map((l) => l.kindId).filter(Boolean))];
+  const kindIds = [...new Set(groups.map((group) => group.kindId).filter(Boolean))];
   const sliceQueries = useQuery({
     queryKey: ['order-slices', kindIds],
     queryFn: async () => {
@@ -277,20 +374,28 @@ export function OrderCreateForm({
   useEffect(() => {
     const loaded = sliceQueries.data;
     if (!loaded) return;
-    setLines((prev) => {
+    setGroups((prev) => {
       let changed = false;
-      const next = prev.map((line) => {
-        if (line.useSlice || line.unitPriceTouched || line.unitPrice > 0 || !line.kindId) {
-          return line;
+      const next = prev.map((group) => {
+        if (group.useSlice || group.unitPriceTouched || asNumber(group.unitPrice) > 0 || !group.kindId) {
+          return group;
         }
-        const price = loaded.get(line.kindId)?.[0]?.sellingPerSqm ?? 0;
-        if (price <= 0) return line;
+        const price = loaded.get(group.kindId)?.[0]?.sellingPerSqm ?? 0;
+        if (price <= 0) return group;
         changed = true;
-        return { ...line, unitPrice: price };
+        return { ...group, unitPrice: price };
       });
       return changed ? next : prev;
     });
   }, [sliceQueries.data]);
+
+  useEffect(() => {
+    if (!pendingFocus) return;
+    const field = document.querySelector<HTMLInputElement>(`[data-focus="${pendingFocus}"]`);
+    if (!field) return;
+    field.focus();
+    setPendingFocus(null);
+  }, [pendingFocus, groups]);
 
   const sliceById = useMemo(() => {
     const m = new Map<string, MarbleSlice>();
@@ -310,7 +415,21 @@ export function OrderCreateForm({
   });
 
   const createOrder = useMutation({
-    mutationFn: api.createOrder,
+    mutationFn: async (body: Parameters<typeof api.createOrder>[0]) => {
+      let orderNumber = savedOrderNumber.current;
+      if (!orderNumber) {
+        const order = await api.createOrder(body);
+        orderNumber = order.orderNumber;
+        savedOrderNumber.current = orderNumber;
+      }
+      if (paperFiles.length > 0) {
+        try {
+          await api.uploadOrderPapers(orderNumber, paperFiles);
+        } catch {
+          throw new Error(t.paperFailed);
+        }
+      }
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['dashboard-metrics'] });
@@ -322,40 +441,54 @@ export function OrderCreateForm({
     onError: (err: Error) => setSubmitError(err.message),
   });
 
-  const linesSubtotal = lines.reduce(
-    (sum, line) => sum + computeLinePrice(line, sliceById.get(line.sliceId)),
-    0,
+  const linesSubtotal = groups.reduce((sum, group) => {
+    const slice = sliceById.get(group.sliceId);
+    return sum + group.sizes.reduce((sizeSum, size) => sizeSum + computeSizePrice(group, size, slice), 0);
+  }, 0);
+  const edgeRoundingPrice = computeEdgeRoundingTotal(
+    edgePricePerM,
+    edgeRows.filter((row) => row.kind).map((row) => row.meters),
   );
-  const edgeRoundingPrice = computeEdgeRoundingTotal(edgePricePerM, edgeMeters);
   const orderTotal = linesSubtotal + edgeRoundingPrice + pausePrice + levierPrice;
+  const payableTotal = roundPrice
+    ? roundedAmount === ''
+      ? null
+      : Math.max(0, Math.round(Number(roundedAmount)))
+    : orderTotal;
 
-  const warnings = lines.map((line) => {
-    if (!line.useSlice) {
-      if (line.kindId && (!Number.isFinite(line.thicknessM) || line.thicknessM <= 0)) {
+  useEffect(() => {
+    if (!roundPrice || roundedTouched) return;
+    setRoundedAmount(orderTotal);
+  }, [roundPrice, roundedTouched, orderTotal]);
+
+  const warnings = groups.map((group) => {
+    if (!group.useSlice) {
+      if (group.sizes.some((size) => !sizeBlank(size) && !sizeComplete(size))) return t.needSize;
+      if (group.kindId && group.sizes.some(sizeComplete) && asNumber(group.thicknessM) <= 0) {
         return t.needThickness;
       }
       return null;
     }
-    if (!line.sliceId) return null;
-    const slice = sliceById.get(line.sliceId);
-    if (!slice) return t.notEnoughSlices;
-    if (!cutFits(line, slice)) return t.cutDoesNotFit;
-    const needed = slicesNeeded(lines, line.sliceId);
+    if (!group.sliceId) return null;
+    const slice = sliceById.get(group.sliceId);
+    const size = group.sizes[0];
+    if (!slice || !size) return t.notEnoughSlices;
+    if (sizeComplete(size) && !cutFits(size, slice)) return t.cutDoesNotFit;
+    const needed = slicesNeeded(groups, group.sliceId);
     if (needed > availableSlices(slice)) return t.notEnoughSlices;
     return null;
   });
 
-  const updateLine = (index: number, patch: Partial<DraftLine>) => {
-    setLines((prev) =>
-      prev.map((line, i) => {
-        if (i !== index) return line;
-        const next = { ...line, ...patch };
-        if (patch.kindId !== undefined && patch.kindId !== line.kindId) {
+  const updateGroup = (index: number, patch: Partial<DraftGroup>) => {
+    setGroups((prev) =>
+      prev.map((group, i) => {
+        if (i !== index) return group;
+        const next = { ...group, ...patch };
+        if (patch.kindId !== undefined && patch.kindId !== group.kindId) {
           next.sliceId = '';
           next.unitPriceTouched = false;
           if (!next.useSlice) {
-            const price =
-              slicesByKind.get(String(patch.kindId))?.[0]?.sellingPerSqm ?? 0;
+            const price = slicesByKind.get(String(patch.kindId))?.[0]?.sellingPerSqm ?? 0;
             if (price > 0) next.unitPrice = price;
           }
         }
@@ -365,10 +498,66 @@ export function OrderCreateForm({
         }
         if (patch.useSlice === true) {
           next.specialPrice = false;
+          next.sizes = next.sizes.slice(0, 1);
         }
         return next;
       }),
     );
+  };
+
+  const updateSize = (groupIndex: number, sizeIndex: number, patch: Partial<SizeDraft>) => {
+    setGroups((prev) =>
+      prev.map((group, i) => {
+        if (i !== groupIndex) return group;
+        return {
+          ...group,
+          sizes: group.sizes.map((size, j) => (j === sizeIndex ? { ...size, ...patch } : size)),
+        };
+      }),
+    );
+  };
+
+  const addSize = (groupIndex: number, sizeIndex: number, width: number | '') => {
+    const size = emptySize();
+    setGroups((prev) =>
+      prev.map((group, i) => {
+        if (i !== groupIndex) return group;
+        const sizes = group.sizes.map((row, j) => (j === sizeIndex ? { ...row, cutWidthM: width } : row));
+        return { ...group, sizes: [...sizes, size] };
+      }),
+    );
+    setPendingFocus(`length-${size.key}`);
+  };
+
+  const removeSize = (groupIndex: number, sizeIndex: number) => {
+    setGroups((prev) =>
+      prev.map((group, i) => {
+        if (i !== groupIndex || group.sizes.length < 2) return group;
+        return { ...group, sizes: group.sizes.filter((_, j) => j !== sizeIndex) };
+      }),
+    );
+  };
+
+  const moveTo = (event: KeyboardEvent<HTMLInputElement>, focusId: string) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    setPendingFocus(focusId);
+  };
+
+  const onWidthEnter = (event: KeyboardEvent<HTMLInputElement>, groupIndex: number, sizeIndex: number) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const group = groups[groupIndex];
+    if (!group || group.useSlice) return;
+    const next = group.sizes[sizeIndex + 1];
+    if (next) {
+      setPendingFocus(`length-${next.key}`);
+      return;
+    }
+    const size = group.sizes[sizeIndex];
+    const width = event.currentTarget.value === '' ? '' : Number(event.currentTarget.value);
+    if (!size || asNumber(size.cutLengthM) <= 0 || asNumber(width) <= 0) return;
+    addSize(groupIndex, sizeIndex, width);
   };
 
   const submit = (e: FormEvent) => {
@@ -382,45 +571,70 @@ export function OrderCreateForm({
       setSubmitError(warnings.find(Boolean) ?? t.notEnoughSlices);
       return;
     }
-    if (lines.some((l) => !l.kindId)) {
+    if (groups.some((group) => !group.kindId)) {
       setSubmitError(t.selectKind);
       return;
     }
-    if (lines.some((l) => l.useSlice && !l.sliceId)) {
+    if (groups.some((group) => group.useSlice && !group.sliceId)) {
       setSubmitError(t.selectSlice);
       return;
     }
-    if (lines.some((l) => !l.useSlice && l.thicknessM <= 0)) {
+    if (groups.some((group) => !group.useSlice && asNumber(group.thicknessM) <= 0)) {
       setSubmitError(t.needThickness);
       return;
     }
-    const payload: OrderCutLine[] = lines.map((l) =>
-      l.useSlice
-        ? {
-            sliceId: l.sliceId,
-            cutLengthM: l.cutLengthM,
-            cutWidthM: l.cutWidthM,
-            qty: l.qty,
-            ...(l.specialPrice
-              ? { sellingPerSqm: Math.max(0, Math.round(l.unitPrice)) }
-              : {}),
-          }
-        : {
-            kindId: l.kindId,
-            cutLengthM: l.cutLengthM,
-            cutWidthM: l.cutWidthM,
-            thicknessM: l.thicknessM,
-            qty: l.qty,
-            sellingPerSqm: Math.max(0, Math.round(l.unitPrice)),
-          },
-    );
+    const payload: OrderCutLine[] = [];
+    for (const group of groups) {
+      const sizes = group.sizes.filter((size) => !sizeBlank(size));
+      if (sizes.length === 0 || sizes.some((size) => !sizeComplete(size))) {
+        setSubmitError(t.needSize);
+        return;
+      }
+      for (const size of sizes) {
+        payload.push(
+          group.useSlice
+            ? {
+                sliceId: group.sliceId,
+                cutLengthM: asNumber(size.cutLengthM),
+                cutWidthM: asNumber(size.cutWidthM),
+                qty: size.qty,
+                ...(group.specialPrice
+                  ? { sellingPerSqm: Math.max(0, Math.round(asNumber(group.unitPrice))) }
+                  : {}),
+              }
+            : {
+                kindId: group.kindId,
+                cutLengthM: asNumber(size.cutLengthM),
+                cutWidthM: asNumber(size.cutWidthM),
+                thicknessM: asNumber(group.thicknessM),
+                qty: size.qty,
+                sellingPerSqm: Math.max(0, Math.round(asNumber(group.unitPrice))),
+              },
+        );
+      }
+    }
+    if (edgeRows.some((row) => row.meters > 0 && !row.kind)) {
+      setSubmitError(t.needEdgeType);
+      return;
+    }
+    if (edgeRows.some((row) => row.kind && !(row.meters > 0))) {
+      setSubmitError(t.needEdgeLength);
+      return;
+    }
+    if (roundPrice && roundedAmount === '') {
+      setSubmitError(t.needRounded);
+      return;
+    }
+    const finishedEdges = edgeRows.filter((row) => row.kind && row.meters > 0);
     createOrder.mutate({
       customerId,
       lines: payload,
       edgeRoundingPricePerM: edgePricePerM,
-      edgeRoundingMeters: edgeMeters,
+      edgeRoundingMeters: finishedEdges.map((row) => row.meters),
+      edgeRoundingKinds: finishedEdges.map((row) => row.kind),
       pausePrice,
       levierPrice,
+      ...(roundPrice ? { roundedTotal: Math.max(0, Math.round(Number(roundedAmount))) } : {}),
     });
   };
 
@@ -460,28 +674,36 @@ export function OrderCreateForm({
             <button
               type="button"
               data-testid="button-add-cut"
-              onClick={() => setLines([...lines, emptyLine()])}
+              onClick={() => setGroups([...groups, emptyGroup()])}
               className="inline-flex items-center gap-1 rounded-md bg-[#F1EEE8] px-2.5 py-2 text-[10px] font-bold text-[#6E665B] hover:bg-[#E5DED2]"
             >
               <Plus size={13} /> {t.addCut}
             </button>
           </div>
           <div className="space-y-4">
-            {lines.map((line, index) => {
-              const slices = line.kindId ? slicesByKind.get(line.kindId) ?? [] : [];
+            {groups.map((group, index) => {
+              const slices = group.kindId ? slicesByKind.get(group.kindId) ?? [] : [];
               const stockSlices = slices.filter((s) => availableSlices(s) > 0);
-              const slice = line.useSlice ? sliceById.get(line.sliceId) : undefined;
-              const linePrice = computeLinePrice(line, slice);
+              const slice = group.useSlice ? sliceById.get(group.sliceId) : undefined;
               const warn = warnings[index];
               const suggestedPrice = slices[0]?.sellingPerSqm ?? 0;
+              const groupTotal = group.sizes.reduce(
+                (sum, size) => sum + computeSizePrice(group, size, slice),
+                0,
+              );
+              const firstSize = group.sizes[0];
               return (
-                <div key={index} className="rounded-lg border border-[#F0EEE9] bg-[#FBFAF8] p-3">
+                <div key={group.key} className="rounded-lg border border-[#F0EEE9] bg-[#FBFAF8] p-3">
                   <div className="mb-3 flex items-center justify-between">
                     <span className="mono digits-latin text-[10px] text-[#9B8C77]">
                       #{formatNumber(index + 1)}
                     </span>
-                    {lines.length > 1 && (
-                      <button type="button" onClick={() => setLines(lines.filter((_, i) => i !== index))} className="text-[#D95C55]">
+                    {groups.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setGroups(groups.filter((_, i) => i !== index))}
+                        className="text-[#D95C55]"
+                      >
                         <X size={14} />
                       </button>
                     )}
@@ -490,8 +712,8 @@ export function OrderCreateForm({
                     <label className="text-[10px] font-semibold sm:col-span-2">
                       {t.marbleKind}
                       <select
-                        value={line.kindId}
-                        onChange={(e) => updateLine(index, { kindId: e.target.value })}
+                        value={group.kindId}
+                        onChange={(e) => updateGroup(index, { kindId: e.target.value })}
                         className="mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
                       >
                         <option value="">{t.selectKind}</option>
@@ -508,13 +730,9 @@ export function OrderCreateForm({
                         <button
                           type="button"
                           data-testid={`button-use-slice-${index}`}
-                          onClick={() =>
-                            updateLine(index, { useSlice: true, specialPrice: false })
-                          }
+                          onClick={() => updateGroup(index, { useSlice: true, specialPrice: false })}
                           className={`rounded px-2 py-2 text-[10px] font-bold ${
-                            line.useSlice
-                              ? 'bg-white text-[#3A3D3F] shadow-sm'
-                              : 'text-[#6E665B]'
+                            group.useSlice ? 'bg-white text-[#3A3D3F] shadow-sm' : 'text-[#6E665B]'
                           }`}
                         >
                           {t.useRealSlice}
@@ -523,142 +741,195 @@ export function OrderCreateForm({
                           type="button"
                           data-testid={`button-without-slice-${index}`}
                           onClick={() =>
-                            updateLine(index, {
+                            updateGroup(index, {
                               useSlice: false,
                               sliceId: '',
                               specialPrice: true,
-                              unitPrice: line.unitPrice || suggestedPrice,
+                              unitPrice: asNumber(group.unitPrice) || suggestedPrice || '',
                             })
                           }
                           className={`rounded px-2 py-2 text-[10px] font-bold ${
-                            !line.useSlice
-                              ? 'bg-white text-[#3A3D3F] shadow-sm'
-                              : 'text-[#6E665B]'
+                            !group.useSlice ? 'bg-white text-[#3A3D3F] shadow-sm' : 'text-[#6E665B]'
                           }`}
                         >
                           {t.withoutSlice}
                         </button>
                       </div>
                     </div>
-                    {line.useSlice ? (
-                    <label className="text-[10px] font-semibold sm:col-span-2">
-                      {t.inventorySlice}
-                      <select
-                        value={line.sliceId}
-                        disabled={!line.kindId}
-                        onChange={(e) => {
-                          const sliceId = e.target.value;
-                          const next = stockSlices.find((s) => s.id === sliceId);
-                          updateLine(index, {
-                            sliceId,
-                            unitPrice: next?.sellingPerSqm ?? 0,
-                            specialPrice: false,
-                          });
-                        }}
-                        className="mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px] disabled:opacity-50"
-                      >
-                        <option value="">{t.selectSlice}</option>
-                        {stockSlices.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {formatNumber(s.lengthM, 2)}×{formatNumber(s.widthM, 2)}×
-                            {formatNumber(s.thicknessM, 3)} m — {t.available}{' '}
-                            {formatNumber(availableSlices(s))}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    {group.useSlice ? (
+                      <label className="text-[10px] font-semibold sm:col-span-2">
+                        {t.inventorySlice}
+                        <select
+                          value={group.sliceId}
+                          disabled={!group.kindId}
+                          onChange={(e) => {
+                            const sliceId = e.target.value;
+                            const next = stockSlices.find((s) => s.id === sliceId);
+                            updateGroup(index, {
+                              sliceId,
+                              unitPrice: next?.sellingPerSqm ?? '',
+                              specialPrice: false,
+                            });
+                          }}
+                          className="mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px] disabled:opacity-50"
+                        >
+                          <option value="">{t.selectSlice}</option>
+                          {stockSlices.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {formatNumber(s.lengthM, 2)}×{formatNumber(s.widthM, 2)}×
+                              {formatNumber(s.thicknessM, 3)} m — {t.available}{' '}
+                              {formatNumber(availableSlices(s))}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     ) : (
-                    <label className="text-[10px] font-semibold sm:col-span-2">
-                      {t.thickness}
-                      <input
-                        data-testid={`input-thickness-${index}`}
-                        type="number"
-                        min={0.001}
-                        step="0.001"
-                        value={line.thicknessM || ''}
-                        onChange={(e) =>
-                          updateLine(index, { thicknessM: Number(e.target.value) })
-                        }
-                        className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
-                      />
-                    </label>
+                      <label className="text-[10px] font-semibold sm:col-span-2">
+                        {t.thickness}
+                        <input
+                          data-testid={`input-thickness-${index}`}
+                          data-focus={`thickness-${group.key}`}
+                          type="number"
+                          min={0.001}
+                          step="0.001"
+                          value={group.thicknessM}
+                          onChange={(e) =>
+                            updateGroup(index, {
+                              thicknessM: e.target.value === '' ? '' : Number(e.target.value),
+                            })
+                          }
+                          onKeyDown={(e) => firstSize && moveTo(e, `length-${firstSize.key}`)}
+                          className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+                        />
+                      </label>
                     )}
-                    {line.useSlice && line.kindId && !sliceQueries.isFetching && stockSlices.length === 0 && (
+                    {group.useSlice && group.kindId && !sliceQueries.isFetching && stockSlices.length === 0 && (
                       <p className="sm:col-span-2 text-[10px] text-[#D99A32]">{t.noSlices}</p>
                     )}
-                    <label className="text-[10px] font-semibold">
-                      {t.cutLength}
-                      <input
-                        type="number"
-                        min={0.01}
-                        step="0.01"
-                        value={line.cutLengthM}
-                        onChange={(e) =>
-                          updateLine(index, { cutLengthM: Number(e.target.value) })
-                        }
-                        className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
-                      />
-                    </label>
-                    <label className="text-[10px] font-semibold">
-                      {t.cutWidth}
-                      <input
-                        type="number"
-                        min={0.01}
-                        step="0.01"
-                        value={line.cutWidthM}
-                        onChange={(e) =>
-                          updateLine(index, { cutWidthM: Number(e.target.value) })
-                        }
-                        className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
-                      />
-                    </label>
-                    <div className="flex items-end justify-between gap-2 sm:col-span-2">
-                      <span className="text-[10px] font-semibold">{t.qty}</span>
-                      <QuantityStepper
-                        testId={`input-cut-qty-${index}`}
-                        value={line.qty}
-                        onChange={(qty) => updateLine(index, { qty })}
-                      />
-                    </div>
+                    {!group.useSlice && (
+                      <p className="sm:col-span-2 text-[10px] leading-relaxed text-[#8B949A]">{t.enterHint}</p>
+                    )}
+                    {group.sizes.map((size, sizeIndex) => {
+                      const piecePrice = computeSizePrice(group, size, slice);
+                      const nextSize = group.sizes[sizeIndex + 1];
+                      return (
+                        <div key={size.key} className="grid gap-2 sm:col-span-2 sm:grid-cols-2">
+                          {!group.useSlice && (
+                            <div className="flex items-center justify-between sm:col-span-2">
+                              <span className="mono digits-latin text-[10px] text-[#9B8C77]">
+                                #{formatNumber(sizeIndex + 1)}
+                              </span>
+                              {group.sizes.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeSize(index, sizeIndex)}
+                                  className="text-[#D95C55]"
+                                >
+                                  <X size={13} />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          <label className="text-[10px] font-semibold">
+                            {t.cutLength}
+                            <input
+                              data-testid={`input-cut-length-${index}-${sizeIndex}`}
+                              data-focus={`length-${size.key}`}
+                              type="number"
+                              min={0.01}
+                              step="0.01"
+                              value={size.cutLengthM}
+                              onChange={(e) =>
+                                updateSize(index, sizeIndex, {
+                                  cutLengthM: e.target.value === '' ? '' : Number(e.target.value),
+                                })
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') e.preventDefault();
+                                if (!group.useSlice) moveTo(e, `width-${size.key}`);
+                              }}
+                              className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+                            />
+                          </label>
+                          <label className="text-[10px] font-semibold">
+                            {t.cutWidth}
+                            <input
+                              data-testid={`input-cut-width-${index}-${sizeIndex}`}
+                              data-focus={`width-${size.key}`}
+                              type="number"
+                              min={0.01}
+                              step="0.01"
+                              value={size.cutWidthM}
+                              onChange={(e) =>
+                                updateSize(index, sizeIndex, {
+                                  cutWidthM: e.target.value === '' ? '' : Number(e.target.value),
+                                })
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') e.preventDefault();
+                                if (group.useSlice) return;
+                                if (nextSize) moveTo(e, `length-${nextSize.key}`);
+                                else onWidthEnter(e, index, sizeIndex);
+                              }}
+                              className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+                            />
+                          </label>
+                          <div className="flex items-end justify-between gap-2 sm:col-span-2">
+                            <span className="text-[10px] font-semibold">{t.qty}</span>
+                            <QuantityStepper
+                              testId={`input-cut-qty-${index}-${sizeIndex}`}
+                              value={size.qty}
+                              onChange={(qty) => updateSize(index, sizeIndex, { qty })}
+                            />
+                          </div>
+                          {sizeComplete(size) && (
+                            <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                              <span className="digits-latin text-[10px] text-[#8B949A]">
+                                {formatNumber(asNumber(size.cutLengthM), 2)} ×{' '}
+                                {formatNumber(asNumber(size.cutWidthM), 2)} × {formatNumber(size.qty)} ×{' '}
+                                {formatNumber(unitPriceFor(group, slice))}
+                              </span>
+                              <b className="mono digits-latin">{formatCurrency(piecePrice, lang)}</b>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   {slice && (
-                    <p className="mt-3 text-[10px] leading-relaxed text-[#9A6B22]">
-                      {t.remainderWasted}
-                    </p>
+                    <p className="mt-3 text-[10px] leading-relaxed text-[#9A6B22]">{t.remainderWasted}</p>
                   )}
-                  {!line.useSlice && line.kindId && (
-                    <p className="mt-3 text-[10px] leading-relaxed text-[#5F6B76]">
-                      {t.noInventory}
-                    </p>
+                  {!group.useSlice && group.kindId && (
+                    <p className="mt-3 text-[10px] leading-relaxed text-[#5F6B76]">{t.noInventory}</p>
                   )}
                   <div className="mt-3 space-y-2 border-t border-[#E7E5E0] pt-3 text-[11px]">
-                    {line.useSlice && (
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-[#5F6B76]">{t.autoUnitPrice}</span>
-                      <b className="mono digits-latin">
-                        {slice ? formatCurrency(slice.sellingPerSqm, lang) : '—'}
-                        <span className="ms-1 font-medium text-[#8B949A]">/ m²</span>
-                      </b>
-                    </div>
+                    {group.useSlice && (
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[#5F6B76]">{t.autoUnitPrice}</span>
+                        <b className="mono digits-latin">
+                          {slice ? formatCurrency(slice.sellingPerSqm, lang) : '—'}
+                          <span className="ms-1 font-medium text-[#8B949A]">/ m²</span>
+                        </b>
+                      </div>
                     )}
-                    {line.useSlice && (
-                    <label className="flex items-center gap-2 text-[10px] font-semibold text-[#3A3D3F]">
-                      <input
-                        type="checkbox"
-                        data-testid={`checkbox-special-price-${index}`}
-                        checked={line.specialPrice}
-                        disabled={!slice}
-                        onChange={(e) =>
-                          updateLine(index, {
-                            specialPrice: e.target.checked,
-                            unitPrice: slice?.sellingPerSqm ?? line.unitPrice,
-                          })
-                        }
-                      />
-                      {t.specialUnitPrice}
-                    </label>
+                    {group.useSlice && (
+                      <label className="flex items-center gap-2 text-[10px] font-semibold text-[#3A3D3F]">
+                        <input
+                          type="checkbox"
+                          data-testid={`checkbox-special-price-${index}`}
+                          checked={group.specialPrice}
+                          disabled={!slice}
+                          onChange={(e) =>
+                            updateGroup(index, {
+                              specialPrice: e.target.checked,
+                              unitPrice: slice?.sellingPerSqm ?? group.unitPrice,
+                            })
+                          }
+                        />
+                        {t.specialUnitPrice}
+                      </label>
                     )}
-                    {(line.specialPrice || !line.useSlice) && (
+                    {(group.specialPrice || !group.useSlice) && (
                       <label className="block text-[10px] font-semibold">
                         {t.unitPrice}
                         <input
@@ -666,10 +937,13 @@ export function OrderCreateForm({
                           type="number"
                           min={0}
                           step={1}
-                          value={line.unitPrice || ''}
+                          value={group.unitPrice}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.preventDefault();
+                          }}
                           onChange={(e) =>
-                            updateLine(index, {
-                              unitPrice: Number(e.target.value) || 0,
+                            updateGroup(index, {
+                              unitPrice: e.target.value === '' ? '' : Number(e.target.value),
                               unitPriceTouched: true,
                             })
                           }
@@ -679,12 +953,8 @@ export function OrderCreateForm({
                     )}
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-[#5F6B76]">{t.lineTotal}</span>
-                      <b className="mono digits-latin">{formatCurrency(linePrice, lang)}</b>
+                      <b className="mono digits-latin">{formatCurrency(groupTotal, lang)}</b>
                     </div>
-                    <p className="digits-latin text-[10px] text-[#8B949A]">
-                      {formatNumber(line.cutLengthM, 2)} × {formatNumber(line.cutWidthM, 2)} ×{' '}
-                      {formatNumber(line.qty)} × {formatNumber(unitPriceFor(line, slice))}
-                    </p>
                   </div>
                   {warn && (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-[#F5DFC4] bg-[#FCF4E5] px-3 py-2 text-[10px] text-[#9A6B22]">
@@ -696,6 +966,60 @@ export function OrderCreateForm({
               );
             })}
           </div>
+        </div>
+
+        <div className="rounded-lg border border-[#E7E5E0] bg-white p-4">
+          <h3 className="text-xs font-bold">{t.dimensionPaper}</h3>
+          <p className="mt-1 text-[10px] leading-relaxed text-[#8B949A]">{t.paperHint}</p>
+          <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-md bg-[#F1EEE8] px-3 py-2 text-[11px] font-bold text-[#6E665B] hover:bg-[#E5DED2]">
+            <input
+              data-testid="input-order-paper"
+              type="file"
+              accept="image/*,application/pdf,.pdf"
+              multiple
+              className="sr-only"
+              onChange={(e) => {
+                const incoming = [...(e.target.files ?? [])];
+                e.target.value = '';
+                if (incoming.some((file) => !isPaperFile(file))) setPaperError(t.paperType);
+                else setPaperError('');
+                setPaperFiles((prev) => {
+                  const next = [...prev];
+                  for (const file of incoming) {
+                    if (!isPaperFile(file)) continue;
+                    if (next.some((existing) => paperKey(existing) === paperKey(file))) continue;
+                    next.push(file);
+                  }
+                  return next.slice(0, 8);
+                });
+              }}
+            />
+            {t.choosePaper}
+          </label>
+          {paperError && <p className="mt-2 text-[10px] text-[#D95C55]">{paperError}</p>}
+          {paperPreviews.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {paperPreviews.map((preview) => (
+                <div key={preview.key} className="flex items-center gap-3 rounded-md border border-[#F0EEE9] bg-[#FBFAF8] p-2">
+                  {preview.url ? (
+                    <img src={preview.url} alt="" className="h-14 w-14 rounded object-cover" />
+                  ) : (
+                    <span className="flex h-14 w-14 items-center justify-center rounded bg-white text-[10px] font-bold text-[#6E665B]">
+                      PDF
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-[11px]">{preview.file.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPaperFiles((files) => files.filter((file) => paperKey(file) !== preview.key))}
+                    className="text-[#D95C55]"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="rounded-lg border border-[#E7E5E0] bg-white p-4">
@@ -719,42 +1043,67 @@ export function OrderCreateForm({
             <button
               type="button"
               data-testid="button-add-edge-length"
-              onClick={() => setEdgeMeters([...edgeMeters, 0])}
+              onClick={() => setEdgeRows([...edgeRows, { kind: '', meters: 0 }])}
               className="inline-flex items-center gap-1 rounded-md bg-[#F1EEE8] px-2.5 py-2 text-[10px] font-bold text-[#6E665B] hover:bg-[#E5DED2]"
             >
               <Plus size={13} /> {t.addLength}
             </button>
           </div>
+          <p className="mb-3 text-[10px] leading-relaxed text-[#8B949A]">{t.edgeTypeHint}</p>
           <div className="space-y-2">
-            {edgeMeters.map((meters, index) => (
+            {edgeRows.map((row, index) => (
               <div key={index} className="flex items-end gap-2">
-                <label className="flex-1 text-[10px] font-semibold">
-                  <span className="mono digits-latin text-[#9B8C77]">
+                <div className="flex-1">
+                  <span className="mono digits-latin text-[10px] font-semibold text-[#9B8C77]">
                     #{formatNumber(index + 1)}
                   </span>
-                  <input
-                    data-testid={`input-edge-meters-${index}`}
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={meters || ''}
-                    onChange={(e) =>
-                      setEdgeMeters(
-                        edgeMeters.map((v, i) =>
-                          i === index ? Number(e.target.value) || 0 : v,
-                        ),
-                      )
-                    }
-                    className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
-                  />
-                </label>
-                {edgeMeters.length > 1 && (
+                  <div className="mt-1 grid grid-cols-[auto_1fr] gap-2">
+                    <div className="grid grid-cols-2 gap-1 rounded-md bg-[#F1EEE8] p-1">
+                      {([
+                        ['linear', t.edgeLinear],
+                        ['45', t.edge45],
+                      ] as const).map(([kind, label]) => (
+                        <button
+                          key={kind}
+                          type="button"
+                          data-testid={`button-edge-kind-${kind}-${index}`}
+                          onClick={() =>
+                            setEdgeRows(
+                              edgeRows.map((item, i) => (i === index ? { ...item, kind } : item)),
+                            )
+                          }
+                          className={`rounded px-2 py-1.5 text-[10px] font-bold ${
+                            row.kind === kind ? 'bg-white text-[#3A3D3F] shadow-sm' : 'text-[#6E665B]'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      data-testid={`input-edge-meters-${index}`}
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      disabled={!row.kind}
+                      value={row.meters || ''}
+                      onChange={(e) =>
+                        setEdgeRows(
+                          edgeRows.map((item, i) =>
+                            i === index ? { ...item, meters: Number(e.target.value) || 0 } : item,
+                          ),
+                        )
+                      }
+                      placeholder={row.kind ? t.lengthMeters : t.edgeType}
+                      className="digits-latin h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px] disabled:bg-[#F6F5F2] disabled:text-[#B0B6BB]"
+                    />
+                  </div>
+                </div>
+                {edgeRows.length > 1 && (
                   <button
                     type="button"
                     data-testid={`button-remove-edge-length-${index}`}
-                    onClick={() =>
-                      setEdgeMeters(edgeMeters.filter((_, i) => i !== index))
-                    }
+                    onClick={() => setEdgeRows(edgeRows.filter((_, i) => i !== index))}
                     className="mb-1 text-[#D95C55]"
                   >
                     <X size={14} />
@@ -820,10 +1169,58 @@ export function OrderCreateForm({
             <span>le levier</span>
             <b className="mono digits-latin">{formatCurrency(levierPrice, lang)}</b>
           </div>
+          <div className="border-t border-[#E7E5E0] pt-3">
+            <div className="grid grid-cols-2 gap-1 rounded-md bg-[#F1EEE8] p-1">
+              <button
+                type="button"
+                data-testid="button-keep-price"
+                onClick={() => {
+                  setRoundPrice(false);
+                  setRoundedTouched(false);
+                  setRoundedAmount('');
+                }}
+                className={`rounded px-2 py-2 text-[10px] font-bold ${
+                  !roundPrice ? 'bg-white text-[#3A3D3F] shadow-sm' : 'text-[#6E665B]'
+                }`}
+              >
+                {t.keepPrice}
+              </button>
+              <button
+                type="button"
+                data-testid="button-round-price"
+                onClick={() => setRoundPrice(true)}
+                className={`rounded px-2 py-2 text-[10px] font-bold ${
+                  roundPrice ? 'bg-white text-[#3A3D3F] shadow-sm' : 'text-[#6E665B]'
+                }`}
+              >
+                {t.roundPrice}
+              </button>
+            </div>
+            {roundPrice && (
+              <label className="mt-3 block text-[10px] font-semibold">
+                {t.roundAmount}
+                <input
+                  data-testid="input-rounded-total"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={roundedAmount}
+                  onChange={(e) => {
+                    setRoundedTouched(true);
+                    setRoundedAmount(e.target.value === '' ? '' : Number(e.target.value));
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.preventDefault();
+                  }}
+                  className="digits-latin mt-1 h-9 w-full rounded-md border border-[#E7E5E0] bg-white px-2 text-[11px]"
+                />
+              </label>
+            )}
+          </div>
           <div className="flex justify-between border-t border-[#E7E5E0] pt-2 text-sm font-bold">
             <span>{t.orderTotal}</span>
             <b data-testid="text-order-total" className="mono digits-latin">
-              {formatCurrency(orderTotal, lang)}
+              {payableTotal === null ? '—' : formatCurrency(payableTotal, lang)}
             </b>
           </div>
         </div>

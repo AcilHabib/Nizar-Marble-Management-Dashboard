@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import multer from "multer";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@workspace/db";
 import { cutFitsOnSlice, sliceAvailableCount } from "../lib/slice-availability";
@@ -21,7 +22,7 @@ import { actorFromRequest } from "../middleware/staff-actor";
 import {
   computeEdgeRoundingTotal,
   formatOrderEdgesSummary,
-  normalizeEdgeMeters,
+  normalizeEdgeEntries,
 } from "../lib/edge-rounding";
 
 const router: IRouter = Router();
@@ -29,7 +30,43 @@ const router: IRouter = Router();
 const orderInclude = {
   deposits: true,
   customerRecord: { select: { phone: true } },
+  papers: {
+    select: { id: true, contentType: true, filename: true },
+    orderBy: { createdAt: "asc" as const },
+  },
 } as const;
+
+const paperUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 8 },
+});
+
+const PAPER_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+  "application/pdf",
+]);
+
+function paperContentType(file: Express.Multer.File): string | null {
+  const mime = (file.mimetype || "").toLowerCase();
+  if (PAPER_TYPES.has(mime)) return mime;
+  const ext = (file.originalname.split(".").pop() || "").toLowerCase();
+  const fromExt: Record<string, string> = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    gif: "image/gif",
+    heic: "image/heic",
+    heif: "image/heif",
+    pdf: "application/pdf",
+  };
+  return fromExt[ext] ?? null;
+}
 
 function nonNegativeInt(value: unknown): number {
   const n = Math.round(Number(value) || 0);
@@ -59,6 +96,10 @@ router.get("/:orderNumber", async (req, res, next) => {
       include: {
         deposits: { orderBy: { depositDate: "desc" as const } },
         customerRecord: { select: { phone: true } },
+        papers: {
+          select: { id: true, contentType: true, filename: true },
+          orderBy: { createdAt: "asc" as const },
+        },
       },
     });
     if (!order) {
@@ -94,8 +135,10 @@ router.post("/", async (req, res, next) => {
       edgeRoundingPrice,
       edgeRoundingPricePerM = 0,
       edgeRoundingMeters = [],
+      edgeRoundingKinds = [],
       pausePrice: pausePriceRaw,
       levierPrice: levierPriceRaw,
+      roundedTotal: roundedTotalRaw,
     } = req.body as {
       customerId?: string;
       status?: string;
@@ -103,8 +146,10 @@ router.post("/", async (req, res, next) => {
       edgeRoundingPrice?: number;
       edgeRoundingPricePerM?: number;
       edgeRoundingMeters?: number[];
+      edgeRoundingKinds?: string[];
       pausePrice?: number;
       levierPrice?: number;
+      roundedTotal?: number | null;
     };
 
     if (!customerId || typeof customerId !== "string") {
@@ -177,7 +222,13 @@ router.post("/", async (req, res, next) => {
     }
 
     const pricePerM = Math.max(0, Math.round(Number(edgeRoundingPricePerM) || 0));
-    const meters = normalizeEdgeMeters(edgeRoundingMeters);
+    const edgeEntries = normalizeEdgeEntries(edgeRoundingMeters, edgeRoundingKinds);
+    if (!edgeEntries) {
+      res.status(400).json({ error: "Each rounded edge needs a type and a length" });
+      return;
+    }
+    const meters = edgeEntries.meters;
+    const kinds = edgeEntries.kinds;
     let edgesPrice = computeEdgeRoundingTotal(pricePerM, meters);
     if (
       edgesPrice === 0 &&
@@ -316,7 +367,9 @@ router.post("/", async (req, res, next) => {
 
       await consumeReservations(tx, pieces);
 
-      const total = linesSubtotal + edgesPrice + pausePrice + levierPrice;
+      const calculatedTotal = linesSubtotal + edgesPrice + pausePrice + levierPrice;
+      const hasRoundedTotal = roundedTotalRaw !== undefined && roundedTotalRaw !== null;
+      const total = hasRoundedTotal ? nonNegativeInt(roundedTotalRaw) : calculatedTotal;
       const kind =
         [...new Set(pieces.map((p) => p.kind))].filter(Boolean).join("، ") ||
         "—";
@@ -334,6 +387,7 @@ router.post("/", async (req, res, next) => {
           edgeRoundingPrice: edgesPrice,
           edgeRoundingPricePerM: edgesPrice > 0 ? pricePerM : 0,
           edgeRoundingMeters: edgesPrice > 0 ? meters : [],
+          edgeRoundingKinds: edgesPrice > 0 ? kinds : [],
           pausePrice,
           levierPrice,
           status: normalizeOrderStatus(String(status)),
@@ -344,7 +398,7 @@ router.post("/", async (req, res, next) => {
           thickness: pieces[0]?.thickness,
           edges:
             edgesPrice > 0
-              ? formatOrderEdgesSummary(pricePerM, meters, edgesPrice)
+              ? formatOrderEdgesSummary(pricePerM, meters, edgesPrice, kinds)
               : pieces[0]?.edges,
         },
         include: orderInclude,
@@ -375,6 +429,62 @@ router.post("/", async (req, res, next) => {
     next(err);
   }
 });
+
+router.post(
+  "/:orderNumber/papers",
+  paperUpload.array("files", 8),
+  async (req, res, next) => {
+    try {
+      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      if (files.length === 0) {
+        res.status(400).json({ error: "file is required" });
+        return;
+      }
+      const order = await prisma.order.findUnique({
+        where: { orderNumber: req.params.orderNumber },
+        select: { id: true, orderNumber: true },
+      });
+      if (!order) {
+        res.status(404).json({ error: "Order not found" });
+        return;
+      }
+      const prepared = files.map((file) => {
+        const contentType = paperContentType(file);
+        if (!contentType) return null;
+        const filename = (file.originalname || "paper").split(/[/\\]/).pop()?.slice(0, 180) || "paper";
+        return { contentType, filename, data: new Uint8Array(file.buffer) };
+      });
+      if (prepared.some((row) => row === null)) {
+        res.status(400).json({ error: "Only images and PDF files are allowed" });
+        return;
+      }
+      await prisma.$transaction(
+        prepared.map((row) =>
+          prisma.orderAttachment.create({
+            data: {
+              orderId: order.id,
+              contentType: row!.contentType,
+              filename: row!.filename,
+              data: row!.data,
+            },
+          }),
+        ),
+      );
+      await recordStaffAction(
+        actorFromRequest(req),
+        "order.paper",
+        `${order.orderNumber} · ${files.length}`,
+      );
+      const saved = await prisma.order.findUnique({
+        where: { id: order.id },
+        include: orderInclude,
+      });
+      res.status(201).json(serializeOrder(saved!));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 router.post("/:orderNumber/deposits", async (req, res, next) => {
   try {

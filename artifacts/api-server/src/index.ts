@@ -1,5 +1,6 @@
 import "dotenv/config";
 import app from "./app";
+import { ensureAdminAccount } from "./lib/auth";
 import { logger } from "./lib/logger";
 
 const rawPort = process.env["PORT"];
@@ -23,4 +24,7 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+  ensureAdminAccount().catch((err) => {
+    logger.error({ err }, "Could not prepare the admin account");
+  });
 });

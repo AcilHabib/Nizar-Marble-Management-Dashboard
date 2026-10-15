@@ -36,6 +36,7 @@ const t = {
   levierFee: 'le levier',
   unitPrice: 'Prix / m²',
   total: 'Total',
+  rounded: 'Arrondi',
   paid: 'Payé',
   remaining: 'Restant',
   payments: 'Paiements',
@@ -56,6 +57,12 @@ export function OrderReceiptPrint({
 }) {
   const lang = 'fr' as const;
   const remaining = Math.max(order.total - paid, 0);
+  const calculatedTotal =
+    (order.linesSubtotal ?? 0) +
+    (order.edgeRoundingPrice ?? 0) +
+    (order.pausePrice ?? 0) +
+    (order.levierPrice ?? 0);
+  const roundingAdjust = calculatedTotal > 0 ? order.total - calculatedTotal : 0;
   const pieces = order.pieces.length > 0 ? order.pieces : [];
   const orderRef = order.orderNumber || order.id;
   const statusText = translateOrderStatus(order.status, lang);
@@ -64,6 +71,7 @@ export function OrderReceiptPrint({
     order.edgeRoundingPricePerM ?? 0,
     order.edgeRoundingMeters ?? [],
     lang,
+    order.edgeRoundingKinds ?? [],
   );
   const primaryKind = pieces[0]?.kind ?? order.kind.split('،')[0]?.trim() ?? order.kind;
   const kindImage = marbleImagesByKind[primaryKind] ?? marbleImagesByKind[order.kind];
@@ -75,7 +83,10 @@ export function OrderReceiptPrint({
           <h1 className="receipt-brand-title">S.A.R.L NEZZAR</h1>
           <p className="receipt-brand-sub">Marbre, granit, quartz</p>
         </div>
-        <img src={logoUrl} alt="" className="receipt-header-logo" />
+        <div className="receipt-logo-block">
+          <img src={logoUrl} alt="" className="receipt-header-logo" />
+          <p className="receipt-logo-name">NEZZAR MARBRE</p>
+        </div>
       </header>
 
       <div className="receipt-owners">
@@ -197,6 +208,12 @@ export function OrderReceiptPrint({
                 <span className="digits-latin">
                   {formatCurrency(order.levierPrice ?? 0, lang)}
                 </span>
+              </div>
+            )}
+            {roundingAdjust !== 0 && (
+              <div className="receipt-total-row">
+                <span>{t.rounded}</span>
+                <span className="digits-latin">{formatCurrency(roundingAdjust, lang)}</span>
               </div>
             )}
           </>

@@ -41,16 +41,26 @@ export type OrderDto = {
   edgeRoundingPrice: number;
   edgeRoundingPricePerM: number;
   edgeRoundingMeters: number[];
+  edgeRoundingKinds: string[];
   pausePrice: number;
   levierPrice: number;
   customerPhone: string;
   pieces: Order["pieces"];
+  papers: OrderPaperDto[];
+};
+
+export type OrderPaperDto = {
+  id: string;
+  url: string;
+  contentType: string;
+  filename: string;
 };
 
 export function serializeOrder(
   order: Order & {
     deposits: Deposit[];
     customerRecord?: { phone: string } | null;
+    papers?: { id: string; contentType: string; filename: string }[];
   },
 ): OrderDto {
   const paid = paidTotal(order.deposits);
@@ -73,10 +83,17 @@ export function serializeOrder(
     edgeRoundingPrice: order.edgeRoundingPrice ?? 0,
     edgeRoundingPricePerM: order.edgeRoundingPricePerM ?? 0,
     edgeRoundingMeters: order.edgeRoundingMeters ?? [],
+    edgeRoundingKinds: order.edgeRoundingKinds ?? [],
     pausePrice: order.pausePrice ?? 0,
     levierPrice: order.levierPrice ?? 0,
     customerPhone: order.customerPhone || order.customerRecord?.phone || "",
     pieces: order.pieces,
+    papers: (order.papers ?? []).map((paper) => ({
+      id: paper.id,
+      contentType: paper.contentType,
+      filename: paper.filename,
+      url: `/api/uploads/order-paper/${paper.id}`,
+    })),
   };
 }
 

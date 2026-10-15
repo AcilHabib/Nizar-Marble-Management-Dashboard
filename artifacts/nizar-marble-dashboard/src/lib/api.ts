@@ -9,15 +9,23 @@ const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
 export { setApiStaffActor, getApiStaffActor } from '@/lib/api-client';
 export type { ApiStaffActor } from '@/lib/api-client';
 
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: () => void) {
+  onUnauthorized = handler;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...staffActorHeaders(),
       ...(init?.headers ?? {}),
     },
   });
+  if (res.status === 401 && path !== '/auth/login') onUnauthorized?.();
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? res.statusText);
@@ -61,10 +69,19 @@ export type Order = {
   edgeRoundingPrice: number;
   edgeRoundingPricePerM?: number;
   edgeRoundingMeters?: number[];
+  edgeRoundingKinds?: string[];
   pausePrice?: number;
   levierPrice?: number;
   customerPhone?: string;
   pieces: OrderPiece[];
+  papers?: OrderPaper[];
+};
+
+export type OrderPaper = {
+  id: string;
+  url: string;
+  contentType: string;
+  filename: string;
 };
 
 export type Customer = {
@@ -268,6 +285,13 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+  login: (body: { username: string; password: string }) =>
+    request<{ username: string }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  logout: () => request<void>('/auth/logout', { method: 'POST' }),
+  currentUser: () => request<{ username: string }>('/auth/me'),
   deleteCustomer: (id: string) =>
     request<void>(`/customers/${id}`, { method: 'DELETE' }),
   createOrder: (body: {
@@ -275,13 +299,31 @@ export const api = {
     lines: OrderCutLine[];
     edgeRoundingPricePerM?: number;
     edgeRoundingMeters?: number[];
+    edgeRoundingKinds?: string[];
     pausePrice?: number;
     levierPrice?: number;
+    roundedTotal?: number;
   }) =>
     request<Order>('/orders', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  uploadOrderPapers: async (orderNumber: string, files: File[]) => {
+    const form = new FormData();
+    for (const file of files) form.append('files', file);
+    const res = await fetch(`${API_BASE}/orders/${encodeURIComponent(orderNumber)}/papers`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: staffActorHeaders(),
+      body: form,
+    });
+    if (res.status === 401) onUnauthorized?.();
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? res.statusText);
+    }
+    return res.json() as Promise<Order>;
+  },
   addDeposit: (
     orderNumber: string,
     body: { amount: number; method: string; depositKind?: 'payment' | 'refund' },

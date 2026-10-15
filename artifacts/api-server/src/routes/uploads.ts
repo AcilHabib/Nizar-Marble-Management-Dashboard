@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import multer from "multer";
+import { prisma } from "@workspace/db";
 import { loadMarbleImage, saveMarbleImage } from "../lib/mongo-image-store";
 import { sanityConfigured, uploadImageToSanity } from "../lib/sanity-upload";
 import { recordStaffAction } from "../lib/staff-action";
@@ -20,6 +21,26 @@ router.get("/marble-image/:id", async (req, res, next) => {
     }
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     res.setHeader("Content-Type", row.contentType);
+    res.send(Buffer.from(row.data));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/order-paper/:id", async (req, res, next) => {
+  try {
+    const row = await prisma.orderAttachment.findUnique({
+      where: { id: req.params.id },
+      select: { data: true, contentType: true, filename: true },
+    });
+    if (!row) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    const filename = (row.filename || "paper").replace(/["\r\n]/g, "");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Content-Type", row.contentType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
     res.send(Buffer.from(row.data));
   } catch (err) {
     next(err);

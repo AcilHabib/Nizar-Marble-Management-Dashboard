@@ -176,12 +176,28 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .receipt-header--fr {
   flex-direction: row;
 }
+.receipt-logo-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 0 auto;
+  width: 8.6rem;
+  gap: 0.3rem;
+}
 .receipt-header-logo {
-  height: 8.5rem;
-  width: auto;
-  max-width: 260px;
+  height: 7.4rem;
+  width: 8.6rem;
   object-fit: contain;
-  flex-shrink: 0;
+}
+.receipt-logo-name {
+  margin: 0;
+  width: 100%;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  color: #000;
+  text-align: center;
 }
 .receipt-owners {
   display: grid;

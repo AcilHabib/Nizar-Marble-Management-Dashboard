@@ -3,7 +3,9 @@ import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient
 import { StaffAccountMenu } from '@/components/staff-account-menu';
 import { CustomersManagerModal } from '@/components/customers-manager-modal';
 import { OrderCreateForm } from '@/components/order-create-form';
+import { OrderPapers } from '@/components/order-papers';
 import { ActiveStaffProvider, useActiveStaff } from '@/lib/active-staff';
+import { AuthProvider, LoginScreen, useAuth } from '@/lib/auth-session';
 import { OrderReceiptPrint } from '@/components/order-receipt-print';
 import { ReceiptPrintModal } from '@/components/receipt-print-modal';
 import { CancelOrderDialog } from '@/components/cancel-order-dialog';
@@ -28,7 +30,7 @@ import {
 import { statusLabelFr, statusStyle } from '@/lib/order-status';
 import { formatCurrency } from '@/lib/format';
 import { formatReceiptSurface, pieceAmount, pieceUnitPrice } from '@/lib/receipt-format';
-import { formatEdgeRoundingSummary } from '@/lib/edge-rounding';
+import { formatEdgeRoundingBreakdown, formatEdgeRoundingSummary } from '@/lib/edge-rounding';
 import { InventoryKindDetail, InventoryList } from '@/pages/inventory-page';
 import { FinanceBoard } from '@/pages/finance-page';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -37,13 +39,19 @@ import {
   AlertCircle, ArrowUpLeft, Banknote, Bell, Boxes,
   Check, CheckCircle2, ChevronDown, CircleHelp,
   CalendarDays, ClipboardList, Download, FileSpreadsheet, LayoutDashboard,
-  Menu, Package, Pencil, Plus, Printer, ReceiptText,
+  LogOut, Menu, Package, Pencil, Plus, Printer, ReceiptText,
   Search, Settings2, SlidersHorizontal, Trash2, UserPlus, Users,
   WalletCards, X,
 } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useParams, Router as WouterRouter } from 'wouter';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (count, error) => error.message !== 'unauthorized' && count < 1,
+    },
+  },
+});
 const logoUrl = `${import.meta.env.BASE_URL}nizar-marble-logo.png`;
 type Lang = 'ar' | 'fr';
 type Status = OrderStatus;
@@ -85,11 +93,11 @@ const copy = {
     teamSettings: 'إعدادات الفريق', manageStaff: 'إدارة حسابات الموظفين وصلاحياتهم', addStaff: 'إضافة موظف',
     staffAccounts: 'حسابات الموظفين', accountsInTeam: 'حسابات ضمن الفريق', role: 'الدور', email: 'البريد الإلكتروني',
     active: 'نشط', suspended: 'موقوف', action: 'إجراء', ownerPermissions: 'صلاحيات المالك',
-    permissionsText: 'صفحة المالية تطلب رمزاً قبل الدخول. بقية الصفحات متاحة لمن يستخدم البرنامج.',
+    permissionsText: 'الدخول إلى البرنامج يتطلب حساب المسؤول. صفحة المالية تطلب رمزاً إضافياً.',
     newStaff: 'إضافة موظف جديد', editStaff: 'تعديل حساب الموظف', fullName: 'الاسم الكامل', jobTitle: 'المسمى الوظيفي',
     rolePlaceholder: 'الدور في المصنع', saveChanges: 'حفظ التغييرات', addAccount: 'إضافة الحساب', exportReport: 'تصدير التقرير',
     receiptReady: 'تم تجهيز الإيصال للطباعة', exportSuccess: 'تم تصدير ملف Excel بنجاح',     depositSuccess: 'تم تسجيل الدفعة وتحديث الرصيد',
-    edgeRounding: 'تشطيب الحواف', slicesSubtotal: 'مجموع القطع',
+    edgeRounding: 'تشطيب الحواف', slicesSubtotal: 'مجموع القطع', roundedAdjust: 'التقريب',
     customerPhone: 'الهاتف', surface: 'المساحة', pricePerSqm: 'سعر المتر',
     dateFilterAll: 'كل التواريخ', dateFilterDay: 'يوم واحد', dateFilterPeriod: 'فترة',
     dateFrom: 'من', dateTo: 'إلى',
@@ -138,11 +146,11 @@ const copy = {
     teamSettings: 'Paramètres de l’équipe', manageStaff: 'Gérer les comptes et les droits du personnel', addStaff: 'Ajouter un membre',
     staffAccounts: 'Comptes du personnel', accountsInTeam: 'comptes dans l’équipe', role: 'Rôle', email: 'E-mail',
     active: 'Actif', suspended: 'Suspendu', action: 'Action', ownerPermissions: 'Droits du propriétaire',
-    permissionsText: 'La page Finance demande un code. Le reste des pages reste accessible à la personne qui utilise le programme.',
+    permissionsText: 'L’accès au programme exige le compte administrateur. La page Finance demande encore un code.',
     newStaff: 'Ajouter un membre', editStaff: 'Modifier le compte', fullName: 'Nom complet', jobTitle: 'Intitulé du poste',
     rolePlaceholder: 'Rôle dans l’atelier', saveChanges: 'Enregistrer les modifications', addAccount: 'Ajouter le compte', exportReport: 'Exporter le rapport',
     receiptReady: 'Le reçu est prêt à être imprimé', exportSuccess: 'Le fichier Excel a été exporté', depositSuccess: 'Paiement enregistré, solde mis à jour',
-    edgeRounding: 'Finition des chants', slicesSubtotal: 'Sous-total pièces',
+    edgeRounding: 'Finition des chants', slicesSubtotal: 'Sous-total pièces', roundedAdjust: 'Arrondi',
     customerPhone: 'Téléphone', surface: 'Surface', pricePerSqm: 'Prix / m²',
     dateFilterAll: 'Toutes les dates', dateFilterDay: 'Un jour', dateFilterPeriod: 'Période',
     dateFrom: 'Du', dateTo: 'Au',
@@ -200,6 +208,7 @@ function AppShell({ children, lang, setLang }: { children: ReactNode; lang: Lang
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { staff: activeStaff } = useActiveStaff();
+  const { logout } = useAuth();
   const t = copy[lang];
   const staffInitial = activeStaff?.name?.charAt(0) ?? '؟';
   const links = [
@@ -231,6 +240,15 @@ function AppShell({ children, lang, setLang }: { children: ReactNode; lang: Lang
       </div>
       <div className="mt-auto px-4 pb-5">
          <div className="mb-4 rounded-[10px] border border-white/10 bg-white/[.06] p-3.5"><div className="flex items-center gap-2.5"><div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#CFC3AE] text-xs font-bold text-[#3A3D3F]">{staffInitial}</div><div className="min-w-0"><p className="truncate text-xs font-semibold">{activeStaff?.name ?? '—'}</p><p className="truncate text-[10px] text-white/45">{activeStaff?.role ?? t.staff}</p></div><span className="ms-auto h-1.5 w-1.5 shrink-0 rounded-full bg-[#2E9B68]" title={lang === 'ar' ? 'جلسة نشطة' : 'Session active'} /></div></div>
+        <button
+          type="button"
+          data-testid="button-logout"
+          onClick={() => void logout()}
+          className="mb-3 flex w-full items-center gap-2 rounded-[9px] px-3 py-2.5 text-[12px] font-semibold text-white/70 hover:bg-white/10 hover:text-white"
+        >
+          <LogOut size={15} />
+          {lang === 'ar' ? 'تسجيل الخروج' : 'Déconnexion'}
+        </button>
         <div className="flex items-center justify-between px-2 text-[10px] text-white/40"><span>v2.4.0</span><CircleHelp size={14} /></div>
       </div>
     </aside>
@@ -546,12 +564,29 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
           order.edgeRoundingMeters ?? [],
           order.edgeRoundingPrice,
           lang,
+          order.edgeRoundingKinds ?? [],
         )
       : order.edges ?? '—';
+  const edgeDetail =
+    order.edgeRoundingPrice > 0
+      ? formatEdgeRoundingBreakdown(
+          order.edgeRoundingPricePerM ?? 0,
+          order.edgeRoundingMeters ?? [],
+          lang,
+          order.edgeRoundingKinds ?? [],
+        )
+      : null;
   const marbleImagesByKind: Record<string, string> = {};
   for (const k of marbleKinds) {
     if (k.imageUrl) marbleImagesByKind[k.name] = k.imageUrl;
   }
+
+  const calculatedTotal =
+    (order.linesSubtotal ?? 0) +
+    order.edgeRoundingPrice +
+    (order.pausePrice ?? 0) +
+    (order.levierPrice ?? 0);
+  const roundingAdjust = calculatedTotal > 0 ? order.total - calculatedTotal : 0;
 
   const isCancelled = normalizeOrderStatus(order.status) === 'ملغاة';
 
@@ -589,7 +624,7 @@ function OrderDetail({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void
   return <AppShell lang={lang} setLang={setLang}><div className="no-print mb-6 flex items-center gap-2 text-[11px] text-[#5F6B76]"><Link href="/orders" data-testid="link-back-orders" className="hover:text-[#3A3D3F]">{t.orders}</Link><span>/</span><span className="font-semibold text-[#3A3D3F]">{order.id}</span></div>
      <OrderReceiptPrint order={order} deposits={deposits} paid={paid} marbleImagesByKind={marbleImagesByKind} />
      <div className="order-screen-content"><PageIntro eyebrow={t.orderDetails} title={order.id} description={`${order.customer} · ${orderDate(order.date, lang)}`} action={<><Button testId="button-receipt-header" onClick={() => setHeaderModal(true)} variant="outline" icon={<Settings2 size={15} />}>{t.receiptHeaderSettings}</Button><Button testId="button-print-receipt" onClick={() => setPrintModal(true)} variant="outline" icon={<Printer size={15} />}>{t.printReceipt}</Button><Button testId="button-export-order" onClick={() => { setNotice(t.exportSuccess); setTimeout(() => setNotice(''), 2800); }} variant="stone" icon={<FileSpreadsheet size={15} />}>{t.exportExcel}</Button><Button testId="button-delete-order-detail" onClick={() => { if (window.confirm(t.confirmDeleteOrder)) deleteMutation.mutate(); }} variant="danger" icon={<Trash2 size={15} />}>{t.deleteOrder}</Button></>} />{notice && <div data-testid="status-order-feedback" className="no-print mb-4 flex items-center gap-2 rounded-lg border border-[#BCE3C9] bg-[#EAF6EF] px-4 py-3 text-xs font-semibold text-[#2E9B68]"><CheckCircle2 size={16} />{notice}</div>}
-     <div className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]"><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-bold">{t.orderData}</h2><div className="flex items-center gap-2 text-[10px] font-semibold text-[#8B949A]"><span>{t.status}</span><OrderStatusPicker testId="select-order-detail-status" value={order.status} lang={lang} disabled={statusMutation.isPending} onChange={(s) => { if (s === 'ملغاة' && normalizeOrderStatus(order.status) !== 'ملغاة' && orderUsesInventorySlice(order)) { statusMutation.reset(); setCancelOpen(true); return; } statusMutation.mutate({ status: s }); }} /></div></div><div className="grid gap-y-5 sm:grid-cols-3">{[[t.customer, order.customer],[t.customerPhone, order.customerPhone || '—'],[t.staffCreator, order.staff],[t.marbleKind, order.kind],[t.dimensions, order.dimensions ?? '—'],[t.thickness, order.thickness ?? '—'],[t.edges, edgesDisplay]].map(([label, value]) => <div key={String(label)}><p className="mb-1 text-[10px] text-[#8B949A]">{label}</p><p className="text-xs font-semibold">{value}</p></div>)}</div></section><section className="soft-shadow card-line overflow-x-auto rounded-[11px] bg-white"><div className="flex items-center justify-between border-b border-[#E7E5E0] p-5"><h2 className="text-sm font-bold">{t.orderPiecesLabel}</h2><span className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `${pieceRows.length} قطع` : `${pieceRows.length} pièces`}</span></div><table className="w-full min-w-[760px] text-xs"><thead className="bg-[#FBFAF8] text-[10px] text-[#8B949A]"><tr><th className="px-5 py-3 text-start font-medium">{t.marbleKind}</th><th className="px-5 py-3 text-start font-medium">{t.dimensions}</th><th className="px-5 py-3 text-start font-medium">{t.surface}</th><th className="px-5 py-3 text-end font-medium">{t.pricePerSqm}</th><th className="px-5 py-3 text-start font-medium">{t.quantityShort}</th><th className="px-5 py-3 text-end font-medium">{t.sellingPrice}</th></tr></thead><tbody>{pieceRows.map((row, i) => <tr key={`${i}-${row.kind}-${row.dims}`} className="border-t border-[#F0EEE9]"><td className="px-5 py-3.5 font-semibold">{row.kind}</td><td className="px-5 py-3.5 text-[#5F6B76]">{row.dims}</td><td className="digits-latin px-5 py-3.5">{formatReceiptSurface(row)}</td><td className="mono digits-latin px-5 py-3.5 text-end">{formatCurrency(pieceUnitPrice(row), lang)}</td><td className="px-5 py-3.5">{row.qty}</td><td className="mono px-5 py-3.5 text-end">{formatCurrency(pieceAmount(row), lang)}</td></tr>)}</tbody></table></section></div><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-6 flex items-center justify-between"><h2 className="text-sm font-bold">{t.paymentSummary}</h2><Banknote size={18} className="text-[#9B8C77]" /></div><div className="space-y-3 border-b border-[#E7E5E0] pb-5 text-xs">{(order.linesSubtotal > 0 || order.edgeRoundingPrice > 0 || (order.pausePrice ?? 0) > 0 || (order.levierPrice ?? 0) > 0) && <><div className="flex justify-between"><span className="text-[#5F6B76]">{t.slicesSubtotal}</span><b>{formatCurrency(order.linesSubtotal ?? order.total, lang)}</b></div>{order.edgeRoundingPrice > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">{t.edgeRounding}</span><b>{formatCurrency(order.edgeRoundingPrice, lang)}</b></div>}{(order.pausePrice ?? 0) > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">la pause</span><b>{formatCurrency(order.pausePrice ?? 0, lang)}</b></div>}{(order.levierPrice ?? 0) > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">le levier</span><b>{formatCurrency(order.levierPrice ?? 0, lang)}</b></div>}</>}<div className="flex justify-between"><span className="text-[#5F6B76]">{t.orderTotal}</span><b>{formatCurrency(order.total, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.paid}</span><b className="text-[#2E9B68]">{formatCurrency(paid, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.remaining}</span><b className="text-[#D95C55]">{formatCurrency(remaining, lang)}</b></div></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-[#F1EEE8]"><div className="h-full rounded-full bg-[#2E9B68] transition-all" style={{ width: `${Math.min(order.total ? (paid / order.total) * 100 : 0, 100)}%` }} /></div><p className="mt-2 text-[10px] text-[#8B949A]">{order.total ? Math.round((paid / order.total) * 100) : 0}% {t.paidPercent}</p><div className="no-print flex flex-wrap gap-2"><Button testId="button-add-deposit" onClick={() => setModal(true)} variant="dark" icon={<Plus size={15} />}>{t.addDeposit}</Button>{isCancelled && paid > 0 && <Button testId="button-refund-order" onClick={() => setRefundModal(true)} variant="outline" icon={<CreditCard size={15} />}>{t.refundCustomer}</Button>}</div></section><section className="soft-shadow card-line rounded-[11px] bg-white p-5"><h2 className="mb-4 text-sm font-bold">{t.depositLog}</h2><div className="space-y-3">{deposits.map(d => { const signed = depositSignedAmount(d); const isRefund = d.depositKind === 'refund'; return <div key={d.id} className="flex items-center gap-3"><div className={`flex h-8 w-8 items-center justify-center rounded-full ${isRefund ? 'bg-[#FBEDEC] text-[#D95C55]' : 'bg-[#EAF6EF] text-[#2E9B68]'}`}><Check size={14} /></div><div className="flex-1"><p className="text-xs font-semibold">{depositMethodLabel(d)}</p><p className="text-[10px] text-[#8B949A]">{orderDate(d.date, lang)}</p></div><b className={`mono text-xs ${isRefund ? 'text-[#D95C55]' : 'text-[#2E9B68]'}`}>{signed >= 0 ? '+' : ''}{formatCurrency(signed, lang)}</b></div>; })}</div></section></div></div>
+     <div className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]"><div className="space-y-5"><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-bold">{t.orderData}</h2><div className="flex items-center gap-2 text-[10px] font-semibold text-[#8B949A]"><span>{t.status}</span><OrderStatusPicker testId="select-order-detail-status" value={order.status} lang={lang} disabled={statusMutation.isPending} onChange={(s) => { if (s === 'ملغاة' && normalizeOrderStatus(order.status) !== 'ملغاة' && orderUsesInventorySlice(order)) { statusMutation.reset(); setCancelOpen(true); return; } statusMutation.mutate({ status: s }); }} /></div></div><div className="grid gap-y-5 sm:grid-cols-3">{[[t.customer, order.customer],[t.customerPhone, order.customerPhone || '—'],[t.staffCreator, order.staff],[t.marbleKind, order.kind],[t.dimensions, order.dimensions ?? '—'],[t.thickness, order.thickness ?? '—'],[t.edges, edgesDisplay]].map(([label, value]) => <div key={String(label)}><p className="mb-1 text-[10px] text-[#8B949A]">{label}</p><p className="text-xs font-semibold">{value}</p></div>)}</div></section><section className="soft-shadow card-line overflow-x-auto rounded-[11px] bg-white"><div className="flex items-center justify-between border-b border-[#E7E5E0] p-5"><h2 className="text-sm font-bold">{t.orderPiecesLabel}</h2><span className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `${pieceRows.length} قطع` : `${pieceRows.length} pièces`}</span></div><table className="w-full min-w-[760px] text-xs"><thead className="bg-[#FBFAF8] text-[10px] text-[#8B949A]"><tr><th className="px-5 py-3 text-start font-medium">{t.marbleKind}</th><th className="px-5 py-3 text-start font-medium">{t.dimensions}</th><th className="px-5 py-3 text-start font-medium">{t.surface}</th><th className="px-5 py-3 text-end font-medium">{t.pricePerSqm}</th><th className="px-5 py-3 text-start font-medium">{t.quantityShort}</th><th className="px-5 py-3 text-end font-medium">{t.sellingPrice}</th></tr></thead><tbody>{pieceRows.map((row, i) => <tr key={`${i}-${row.kind}-${row.dims}`} className="border-t border-[#F0EEE9]"><td className="px-5 py-3.5 font-semibold">{row.kind}</td><td className="px-5 py-3.5 text-[#5F6B76]">{row.dims}</td><td className="digits-latin px-5 py-3.5">{formatReceiptSurface(row)}</td><td className="mono digits-latin px-5 py-3.5 text-end">{formatCurrency(pieceUnitPrice(row), lang)}</td><td className="px-5 py-3.5">{row.qty}</td><td className="mono px-5 py-3.5 text-end">{formatCurrency(pieceAmount(row), lang)}</td></tr>)}</tbody></table></section></div><div className="space-y-5"><OrderPapers lang={lang} papers={order.papers ?? []} /><section className="soft-shadow card-line rounded-[11px] bg-white p-5 md:p-6"><div className="mb-6 flex items-center justify-between"><h2 className="text-sm font-bold">{t.paymentSummary}</h2><Banknote size={18} className="text-[#9B8C77]" /></div><div className="space-y-3 border-b border-[#E7E5E0] pb-5 text-xs">{(order.linesSubtotal > 0 || order.edgeRoundingPrice > 0 || (order.pausePrice ?? 0) > 0 || (order.levierPrice ?? 0) > 0) && <><div className="flex justify-between"><span className="text-[#5F6B76]">{t.slicesSubtotal}</span><b>{formatCurrency(order.linesSubtotal ?? order.total, lang)}</b></div>{order.edgeRoundingPrice > 0 && <div className="flex justify-between gap-3"><span className="text-[#5F6B76]">{t.edgeRounding}{edgeDetail && <span className="mt-0.5 block text-[10px] font-normal leading-relaxed">{edgeDetail}</span>}</span><b className="shrink-0">{formatCurrency(order.edgeRoundingPrice, lang)}</b></div>}{(order.pausePrice ?? 0) > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">la pause</span><b>{formatCurrency(order.pausePrice ?? 0, lang)}</b></div>}{(order.levierPrice ?? 0) > 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">le levier</span><b>{formatCurrency(order.levierPrice ?? 0, lang)}</b></div>}{roundingAdjust !== 0 && <div className="flex justify-between"><span className="text-[#5F6B76]">{t.roundedAdjust}</span><b className="digits-latin">{formatCurrency(roundingAdjust, lang)}</b></div>}</>}<div className="flex justify-between"><span className="text-[#5F6B76]">{t.orderTotal}</span><b>{formatCurrency(order.total, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.paid}</span><b className="text-[#2E9B68]">{formatCurrency(paid, lang)}</b></div><div className="flex justify-between"><span className="text-[#5F6B76]">{t.remaining}</span><b className="text-[#D95C55]">{formatCurrency(remaining, lang)}</b></div></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-[#F1EEE8]"><div className="h-full rounded-full bg-[#2E9B68] transition-all" style={{ width: `${Math.min(order.total ? (paid / order.total) * 100 : 0, 100)}%` }} /></div><p className="mt-2 text-[10px] text-[#8B949A]">{order.total ? Math.round((paid / order.total) * 100) : 0}% {t.paidPercent}</p><div className="no-print flex flex-wrap gap-2"><Button testId="button-add-deposit" onClick={() => setModal(true)} variant="dark" icon={<Plus size={15} />}>{t.addDeposit}</Button>{isCancelled && paid > 0 && <Button testId="button-refund-order" onClick={() => setRefundModal(true)} variant="outline" icon={<CreditCard size={15} />}>{t.refundCustomer}</Button>}</div></section><section className="soft-shadow card-line rounded-[11px] bg-white p-5"><h2 className="mb-4 text-sm font-bold">{t.depositLog}</h2><div className="space-y-3">{deposits.map(d => { const signed = depositSignedAmount(d); const isRefund = d.depositKind === 'refund'; return <div key={d.id} className="flex items-center gap-3"><div className={`flex h-8 w-8 items-center justify-center rounded-full ${isRefund ? 'bg-[#FBEDEC] text-[#D95C55]' : 'bg-[#EAF6EF] text-[#2E9B68]'}`}><Check size={14} /></div><div className="flex-1"><p className="text-xs font-semibold">{depositMethodLabel(d)}</p><p className="text-[10px] text-[#8B949A]">{orderDate(d.date, lang)}</p></div><b className={`mono text-xs ${isRefund ? 'text-[#D95C55]' : 'text-[#2E9B68]'}`}>{signed >= 0 ? '+' : ''}{formatCurrency(signed, lang)}</b></div>; })}</div></section></div></div>
      {modal && <Modal title={t.newDeposit} onClose={() => setModal(false)}><form onSubmit={addDeposit} className="space-y-4"><Field label={t.depositAmount} name="amount" type="number" placeholder="0" required /><label className="block text-xs font-semibold">{t.paymentMethod}<select name="method" className="mt-1.5 h-10 w-full rounded-lg border border-[#E7E5E0] bg-white px-3 text-xs outline-none focus:border-[#CFC3AE]"><option value="تحويل بنكي">{t.bankTransfer}</option><option value="نقدي">{t.cash}</option><option value="بطاقة">{t.card}</option></select></label><div className="flex justify-end gap-2 pt-2"><Button testId="button-cancel-deposit" onClick={() => setModal(false)} variant="outline">{t.cancel}</Button><Button testId="button-submit-deposit" variant="dark">{t.saveDeposit}</Button></div></form></Modal>}
      {refundModal && <Modal title={t.newRefund} onClose={() => setRefundModal(false)}><form onSubmit={addRefund} className="space-y-4"><Field label={t.refundAmount} name="amount" type="number" placeholder="0" required /><p className="text-[10px] text-[#5F6B76]">{lang === 'ar' ? `الحد الأقصى: ${formatCurrency(paid, lang)}` : `Maximum : ${formatCurrency(paid, lang)}`}</p><div className="flex justify-end gap-2 pt-2"><Button testId="button-cancel-refund" onClick={() => setRefundModal(false)} variant="outline">{t.cancel}</Button><Button testId="button-submit-refund" variant="dark">{t.saveRefund}</Button></div></form></Modal>}</div>
      {headerModal && <ReceiptHeaderSettingsModal lang={lang} lines={receiptLines} onChange={setReceiptLines} onClose={() => setHeaderModal(false)} />}
@@ -657,6 +692,14 @@ function Modal({ title, children, onClose, wide = false }: { title: string; chil
   return <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#17212B]/35 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"><div className={`fade-up w-full rounded-t-[16px] bg-[#F8F8F6] p-5 shadow-2xl sm:rounded-[13px] md:p-6 ${wide ? 'max-w-[650px]' : 'max-w-[500px]'}`}><div className="mb-6 flex items-center justify-between"><h2 className="text-base font-bold">{title}</h2><button data-testid="button-close-modal" onClick={onClose} className="rounded-md p-1.5 text-[#8B949A] transition hover:bg-[#E7E5E0] hover:text-[#3A3D3F]"><X size={18} /></button></div>{children}</div></div>;
 }
 
+function ProtectedRoutes({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
+  const { username, loading } = useAuth();
+  if (loading) {
+    return <div className="flex min-h-dvh items-center justify-center bg-[#F8F8F6] text-sm text-[#5F6B76]">{lang === 'ar' ? 'جاري التحقق...' : 'Vérification...'}</div>;
+  }
+  if (!username) return <LoginScreen lang={lang} setLang={setLang} />;
+  return <ActiveStaffProvider><Router lang={lang} setLang={setLang} /></ActiveStaffProvider>;
+}
 function Router({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
   return <ErrorBoundary resetKey={location.pathname}><Switch><Route path="/orders/:orderId"><OrderDetail lang={lang} setLang={setLang} /></Route><Route path="/inventory/:kindId"><Inventory lang={lang} setLang={setLang} /></Route><Route path="/inventory"><Inventory lang={lang} setLang={setLang} /></Route><Route path="/orders"><Orders lang={lang} setLang={setLang} /></Route><Route path="/finance"><Finance lang={lang} setLang={setLang} /></Route><Route path="/settings"><Settings lang={lang} setLang={setLang} /></Route><Route path="/"><Dashboard lang={lang} setLang={setLang} /></Route><Route><NotFound /></Route></Switch></ErrorBoundary>;
 }
@@ -682,13 +725,13 @@ function App() {
   }, []);
   return (
     <QueryClientProvider client={queryClient}>
-      <ActiveStaffProvider>
+      <AuthProvider>
         <NavigationLoader />
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-          <Router lang={lang} setLang={setLang} />
+          <ProtectedRoutes lang={lang} setLang={setLang} />
         </WouterRouter>
         <Toaster />
-      </ActiveStaffProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
